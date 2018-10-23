@@ -237,7 +237,7 @@ namespace cv
                     ivx::Image::createAddressing(dst.cols, dst.rows, 2, (vx_int32)(dst.step)), dst.data);
 
             //ATTENTION: VX_CONTEXT_IMMEDIATE_BORDER attribute change could lead to strange issues in multi-threaded environments
-            //since OpenVX standart says nothing about thread-safety for now
+            //since OpenVX standard says nothing about thread-safety for now
             ivx::border_t prevBorder = ctx.immediateBorder();
             ctx.setImmediateBorder(border, (vx_uint8)(0));
             if(dx)
@@ -289,7 +289,7 @@ static bool ipp_Deriv(InputArray _src, OutputArray _dst, int dx, int dy, int ksi
     }
 
     IppiMaskSize maskSize = ippiGetMaskSize(ksize, ksize);
-    if(maskSize < 0)
+    if((int)maskSize < 0)
         return false;
 
 #if IPP_VERSION_X100 <= 201703
@@ -299,7 +299,7 @@ static bool ipp_Deriv(InputArray _src, OutputArray _dst, int dx, int dy, int ksi
 #endif
 
     IwiDerivativeType derivType = ippiGetDerivType(dx, dy, (useScharr)?false:true);
-    if(derivType < 0)
+    if((int)derivType < 0)
         return false;
 
     // Acquire data and begin processing
@@ -481,7 +481,7 @@ void cv::Scharr( InputArray _src, OutputArray _dst, int ddepth, int dx, int dy,
     if( scale != 1 )
     {
         // usually the smoothing part is the slowest to compute,
-        // so try to scale it instead of the faster differenciating part
+        // so try to scale it instead of the faster differentiating part
         if( dx == 0 )
             kx *= scale;
         else
@@ -546,10 +546,10 @@ static bool ocl_Laplacian5(InputArray _src, OutputArray _dst,
     size_t lmsz = dev.localMemSize();
     size_t src_step = _src.step(), src_offset = _src.offset();
     const size_t tileSizeYmax = wgs / tileSizeX;
+    CV_Assert(src_step != 0 && esz != 0);
 
-    // workaround for Nvidia: 3 channel vector type takes 4*elem_size in local memory
+    // workaround for NVIDIA: 3 channel vector type takes 4*elem_size in local memory
     int loc_mem_cn = dev.vendorID() == ocl::Device::VENDOR_NVIDIA && cn == 3 ? 4 : cn;
-
     if (((src_offset % src_step) % esz == 0) &&
         (
          (borderType == BORDER_CONSTANT || borderType == BORDER_REPLICATE) ||
@@ -558,6 +558,7 @@ static bool ocl_Laplacian5(InputArray _src, OutputArray _dst,
         ) &&
         (tileSizeX * tileSizeYmin <= wgs) &&
         (LAPLACIAN_LOCAL_MEM(tileSizeX, tileSizeYmin, kernelX.cols, loc_mem_cn * 4) <= lmsz)
+        && OCL_PERFORMANCE_CHECK(!dev.isAMD())  // TODO FIXIT 2018: Problem with AMDGPU on Linux (2482.3)
        )
     {
         Size size = _src.size(), wholeSize;
@@ -728,7 +729,7 @@ static bool ipp_Laplacian(InputArray _src, OutputArray _dst, int ksize, double s
         useScale = true;
 
     IppiMaskSize maskSize = ippiGetMaskSize(ksize, ksize);
-    if(maskSize < 0)
+    if((int)maskSize < 0)
         return false;
 
     // Acquire data and begin processing

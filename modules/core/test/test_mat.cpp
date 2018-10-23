@@ -1,10 +1,9 @@
+// This file is part of OpenCV project.
+// It is subject to the license terms in the LICENSE file found in the top-level directory
+// of this distribution and at http://opencv.org/license.html.
 #include "test_precomp.hpp"
 
-#include <map>
-
-using namespace cv;
-using namespace std;
-
+namespace opencv_test { namespace {
 
 class Core_ReduceTest : public cvtest::BaseTest
 {
@@ -770,8 +769,8 @@ void Core_ArrayOpTest::run( int /* start_from */)
         SparseMat M( dims, size, depth );
         map<string, double> M0;
 
-        int nz0 = (unsigned)rng % max(p/5,10);
-        nz0 = min(max(nz0, 1), p);
+        int nz0 = (unsigned)rng % std::max(p/5,10);
+        nz0 = std::min(std::max(nz0, 1), p);
         all_vals.resize(nz0);
         all_vals2.resize(nz0);
         Mat_<double> _all_vals(all_vals), _all_vals2(all_vals2);
@@ -791,9 +790,9 @@ void Core_ArrayOpTest::run( int /* start_from */)
         }
 
         minMaxLoc(_all_vals, &min_val, &max_val);
-        double _norm0 = cvtest::norm(_all_vals, CV_C);
-        double _norm1 = cvtest::norm(_all_vals, CV_L1);
-        double _norm2 = cvtest::norm(_all_vals, CV_L2);
+        double _norm0 = cv/*test*/::norm(_all_vals, CV_C);
+        double _norm1 = cv/*test*/::norm(_all_vals, CV_L1);
+        double _norm2 = cv/*test*/::norm(_all_vals, CV_L2);
 
         for( i = 0; i < nz0; i++ )
         {
@@ -828,9 +827,9 @@ void Core_ArrayOpTest::run( int /* start_from */)
         SparseMat M3; SparseMat(Md).convertTo(M3, Md.type(), 2);
 
         int nz1 = (int)M.nzcount(), nz2 = (int)M3.nzcount();
-        double norm0 = norm(M, CV_C);
-        double norm1 = norm(M, CV_L1);
-        double norm2 = norm(M, CV_L2);
+        double norm0 = cv/*test*/::norm(M, CV_C);
+        double norm1 = cv/*test*/::norm(M, CV_L1);
+        double norm2 = cv/*test*/::norm(M, CV_L2);
         double eps = depth == CV_32F ? FLT_EPSILON*100 : DBL_EPSILON*1000;
 
         if( nz1 != nz0 || nz2 != nz0)
@@ -851,8 +850,8 @@ void Core_ArrayOpTest::run( int /* start_from */)
             break;
         }
 
-        int n = (unsigned)rng % max(p/5,10);
-        n = min(max(n, 1), p) + nz0;
+        int n = (unsigned)rng % std::max(p/5,10);
+        n = std::min(std::max(n, 1), p) + nz0;
 
         for( i = 0; i < n; i++ )
         {
@@ -919,7 +918,7 @@ void Core_ArrayOpTest::run( int /* start_from */)
         int idx1[MAX_DIM], idx2[MAX_DIM];
         double val1 = 0, val2 = 0;
         M3 = SparseMat(Md);
-        minMaxLoc(M3, &val1, &val2, idx1, idx2);
+        cv::minMaxLoc(M3, &val1, &val2, idx1, idx2);
         string s1 = idx2string(idx1, dims), s2 = idx2string(idx2, dims);
         if( val1 != min_val || val2 != max_val || s1 != min_sidx || s2 != max_sidx )
         {
@@ -930,7 +929,7 @@ void Core_ArrayOpTest::run( int /* start_from */)
             break;
         }
 
-        minMaxIdx(Md, &val1, &val2, idx1, idx2);
+        cv::minMaxIdx(Md, &val1, &val2, idx1, idx2);
         s1 = idx2string(idx1, dims), s2 = idx2string(idx2, dims);
         if( (min_val < 0 && (val1 != min_val || s1 != min_sidx)) ||
            (max_val > 0 && (val2 != max_val || s2 != max_sidx)) )
@@ -1015,8 +1014,8 @@ protected:
         Size mSize(rng.uniform(minMSize, maxMSize), rng.uniform(minMSize, maxMSize));
         size_t mvSize = rng.uniform(1, maxMvSize);
 
-        int res = cvtest::TS::OK, curRes = res;
-        curRes = run_case(CV_8U, mvSize, mSize, rng);
+        int res = cvtest::TS::OK;
+        int curRes = run_case(CV_8U, mvSize, mSize, rng);
         res = curRes != cvtest::TS::OK ? curRes : res;
 
         curRes = run_case(CV_8S, mvSize, mSize, rng);
@@ -1066,7 +1065,7 @@ protected:
         merge(src, dst);
 
         // check result
-        stringstream commonLog;
+        std::stringstream commonLog;
         commonLog << "Depth " << depth << " :";
         if(dst.depth() != depth)
         {
@@ -1115,7 +1114,7 @@ protected:
         split(src, dst);
 
         // check result
-        stringstream commonLog;
+        std::stringstream commonLog;
         commonLog << "Depth " << depth << " :";
         if(dst.size() != channels)
         {
@@ -1391,7 +1390,7 @@ TEST(Core_SVD, orthogonality)
         Mat mat_U, mat_W;
         SVD::compute(mat_D, mat_W, mat_U, noArray(), SVD::FULL_UV);
         mat_U *= mat_U.t();
-        ASSERT_LT(norm(mat_U, Mat::eye(2, 2, type), NORM_INF), 1e-5);
+        ASSERT_LT(cvtest::norm(mat_U, Mat::eye(2, 2, type), NORM_INF), 1e-5);
     }
 }
 
@@ -1512,6 +1511,19 @@ TEST(Mat, regression_5991)
     EXPECT_EQ(0, cvtest::norm(mat, Mat(3, sz, CV_8U, Scalar(1)), NORM_INF));
 }
 
+TEST(Mat, regression_9720)
+{
+    Mat mat(1, 1, CV_32FC1);
+    mat.at<float>(0) = 1.f;
+    const float a = 0.1f;
+    Mat me1 = (Mat)(mat.mul((a / mat)));
+    Mat me2 = (Mat)(mat.mul((Mat)(a / mat)));
+    Mat me3 = (Mat)(mat.mul((a * mat)));
+    Mat me4 = (Mat)(mat.mul((Mat)(a * mat)));
+    EXPECT_EQ(me1.at<float>(0), me2.at<float>(0));
+    EXPECT_EQ(me3.at<float>(0), me4.at<float>(0));
+}
+
 #ifdef OPENCV_TEST_BIGDATA
 TEST(Mat, regression_6696_BigData_8Gb)
 {
@@ -1600,6 +1612,32 @@ TEST(Mat, regression_7873_mat_vector_initialize)
     ASSERT_EQ(2, sub_mat.size[2]);
 }
 
+TEST(Mat, regression_10507_mat_setTo)
+{
+    Size sz(6, 4);
+    Mat test_mask(sz, CV_8UC1, cv::Scalar::all(255));
+    test_mask.at<uchar>(1,0) = 0;
+    test_mask.at<uchar>(0,1) = 0;
+    for (int cn = 1; cn <= 4; cn++)
+    {
+        cv::Mat A(sz, CV_MAKE_TYPE(CV_32F, cn), cv::Scalar::all(5));
+        A.setTo(cv::Scalar::all(std::numeric_limits<float>::quiet_NaN()), test_mask);
+        int nans = 0;
+        for (int y = 0; y < A.rows; y++)
+        {
+            for (int x = 0; x < A.cols; x++)
+            {
+                for (int c = 0; c < cn; c++)
+                {
+                    float v = A.ptr<float>(y, x)[c];
+                    nans += (v == v) ? 0 : 1;
+                }
+            }
+        }
+        EXPECT_EQ(nans, cn * (sz.area() - 2)) << "A=" << A << std::endl << "mask=" << test_mask << std::endl;
+    }
+}
+
 #ifdef CV_CXX_STD_ARRAY
 TEST(Core_Mat_array, outputArray_create_getMat)
 {
@@ -1673,9 +1711,9 @@ TEST(Core_Mat_array, copyTo_roi_row)
 TEST(Core_Mat_array, SplitMerge)
 {
     std::array<cv::Mat, 3> src;
-    for(size_t i=0; i<src.size(); ++i) {
-        src[i].create(10, 10, CV_8U);
-        src[i] = 127 * i;
+    for (size_t i = 0; i < src.size(); ++i)
+    {
+        src[i] = Mat(10, 10, CV_8U, Scalar((double)(16 * (i + 1))));
     }
 
     Mat merged;
@@ -1684,10 +1722,9 @@ TEST(Core_Mat_array, SplitMerge)
     std::array<cv::Mat, 3> dst;
     split(merged, dst);
 
-    Mat diff;
-    for(size_t i=0; i<dst.size(); ++i) {
-        absdiff(src[i], dst[i], diff);
-        EXPECT_EQ(0, countNonZero(diff));
+    for (size_t i = 0; i < dst.size(); ++i)
+    {
+        EXPECT_EQ(0, cvtest::norm(src[i], dst[i], NORM_INF));
     }
 }
 #endif
@@ -1713,24 +1750,34 @@ TEST(Mat_, range_based_for)
 
     Mat_<uchar> ref(3, 3);
     ref.setTo(Scalar(1));
-    ASSERT_DOUBLE_EQ(norm(img, ref), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(img, ref, NORM_INF), 0.);
 }
 
 TEST(Mat, from_initializer_list)
 {
     Mat A({1.f, 2.f, 3.f});
     Mat_<float> B(3, 1); B << 1, 2, 3;
+    Mat_<float> C({3}, {1,2,3});
 
     ASSERT_EQ(A.type(), CV_32F);
-    ASSERT_DOUBLE_EQ(norm(A, B, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(A, B, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(A, C, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(B, C, NORM_INF), 0.);
+
+    auto D = Mat_<double>({2, 3}, {1, 2, 3, 4, 5, 6});
+    EXPECT_EQ(2, D.rows);
+    EXPECT_EQ(3, D.cols);
 }
 
 TEST(Mat_, from_initializer_list)
 {
     Mat_<float> A = {1, 2, 3};
     Mat_<float> B(3, 1); B << 1, 2, 3;
+    Mat_<float> C({3}, {1,2,3});
 
-    ASSERT_DOUBLE_EQ(norm(A, B, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(A, B, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(A, C, NORM_INF), 0.);
+    ASSERT_DOUBLE_EQ(cvtest::norm(B, C, NORM_INF), 0.);
 }
 
 
@@ -1754,3 +1801,85 @@ TEST(Mat_, template_based_ptr)
 }
 
 #endif
+
+
+BIGDATA_TEST(Mat, push_back_regression_4158)  // memory usage: ~10.6 Gb
+{
+    Mat result;
+
+    Mat tail(100, 500000, CV_32FC2, Scalar(1, 2));
+
+    tail.copyTo(result);
+    for (int i = 1; i < 15; i++)
+    {
+        result.push_back(tail);
+        std::cout << "i = " << i << "  result = " << result.size() << "   used = " << (uint64)result.total()*result.elemSize()*(1.0 / (1 << 20)) << " Mb"
+            << "   allocated=" << (uint64)(result.datalimit - result.datastart)*(1.0 / (1 << 20)) << " Mb" << std::endl;
+    }
+    for (int i = 0; i < 15; i++)
+    {
+        Rect roi(0, tail.rows * i, tail.cols, tail.rows);
+        int nz = countNonZero(result(roi).reshape(1) == 2);
+        EXPECT_EQ(tail.total(), (size_t)nz) << "i=" << i;
+    }
+}
+
+
+TEST(Core_Merge, hang_12171)
+{
+    Mat src1(4, 24, CV_8UC1, Scalar::all(1));
+    Mat src2(4, 24, CV_8UC1, Scalar::all(2));
+    Rect src_roi(0, 0, 23, 4);
+    Mat src_channels[2] = { src1(src_roi), src2(src_roi) };
+    Mat dst(4, 24, CV_8UC2, Scalar::all(5));
+    Rect dst_roi(1, 0, 23, 4);
+    cv::merge(src_channels, 2, dst(dst_roi));
+    EXPECT_EQ(5, dst.ptr<uchar>()[0]);
+    EXPECT_EQ(5, dst.ptr<uchar>()[1]);
+    EXPECT_EQ(1, dst.ptr<uchar>()[2]);
+    EXPECT_EQ(2, dst.ptr<uchar>()[3]);
+    EXPECT_EQ(5, dst.ptr<uchar>(1)[0]);
+    EXPECT_EQ(5, dst.ptr<uchar>(1)[1]);
+    EXPECT_EQ(1, dst.ptr<uchar>(1)[2]);
+    EXPECT_EQ(2, dst.ptr<uchar>(1)[3]);
+}
+
+TEST(Core_Split, hang_12171)
+{
+    Mat src(4, 24, CV_8UC2, Scalar(1,2,3,4));
+    Rect src_roi(0, 0, 23, 4);
+    Mat dst1(4, 24, CV_8UC1, Scalar::all(5));
+    Mat dst2(4, 24, CV_8UC1, Scalar::all(10));
+    Rect dst_roi(0, 0, 23, 4);
+    Mat dst[2] = { dst1(dst_roi), dst2(dst_roi) };
+    cv::split(src(src_roi), dst);
+    EXPECT_EQ(1, dst1.ptr<uchar>()[0]);
+    EXPECT_EQ(1, dst1.ptr<uchar>()[1]);
+    EXPECT_EQ(2, dst2.ptr<uchar>()[0]);
+    EXPECT_EQ(2, dst2.ptr<uchar>()[1]);
+    EXPECT_EQ(1, dst1.ptr<uchar>(1)[0]);
+    EXPECT_EQ(1, dst1.ptr<uchar>(1)[1]);
+    EXPECT_EQ(2, dst2.ptr<uchar>(1)[0]);
+    EXPECT_EQ(2, dst2.ptr<uchar>(1)[1]);
+}
+
+TEST(Core_Split, crash_12171)
+{
+    Mat src(4, 40, CV_8UC2, Scalar(1,2,3,4));
+    Rect src_roi(0, 0, 39, 4);
+    Mat dst1(4, 40, CV_8UC1, Scalar::all(5));
+    Mat dst2(4, 40, CV_8UC1, Scalar::all(10));
+    Rect dst_roi(0, 0, 39, 4);
+    Mat dst[2] = { dst1(dst_roi), dst2(dst_roi) };
+    cv::split(src(src_roi), dst);
+    EXPECT_EQ(1, dst1.ptr<uchar>()[0]);
+    EXPECT_EQ(1, dst1.ptr<uchar>()[1]);
+    EXPECT_EQ(2, dst2.ptr<uchar>()[0]);
+    EXPECT_EQ(2, dst2.ptr<uchar>()[1]);
+    EXPECT_EQ(1, dst1.ptr<uchar>(1)[0]);
+    EXPECT_EQ(1, dst1.ptr<uchar>(1)[1]);
+    EXPECT_EQ(2, dst2.ptr<uchar>(1)[0]);
+    EXPECT_EQ(2, dst2.ptr<uchar>(1)[1]);
+}
+
+}} // namespace

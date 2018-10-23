@@ -1,3 +1,7 @@
+// This file is part of OpenCV project.
+// It is subject to the license terms in the LICENSE file found in the top-level directory
+// of this distribution and at http://opencv.org/license.html.
+
 //////////////////////////////////////////////////////////////////////////////////////////
 /////////////////// tests for matrix operations and math functions ///////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -7,8 +11,7 @@
 #include <math.h>
 #include "opencv2/core/softfloat.hpp"
 
-using namespace cv;
-using namespace std;
+namespace opencv_test { namespace {
 
 /// !!! NOTE !!! These tests happily avoid overflow cases & out-of-range arguments
 /// so that output arrays contain neigher Inf's nor Nan's.
@@ -131,7 +134,9 @@ double Core_PowTest::get_success_error_level( int test_case_idx, int i, int j )
     if( depth < CV_32F )
         return power == cvRound(power) && power >= 0 ? 0 : 1;
     else
-        return Base::get_success_error_level( test_case_idx, i, j );
+    {
+        return depth != CV_64F ? Base::get_success_error_level( test_case_idx, i, j ) : DBL_EPSILON*1024*1.1;
+    }
 }
 
 
@@ -3079,7 +3084,7 @@ TEST(Core_Cholesky, accuracy64f)
    for (int i = 0; i < A.rows; i++)
        for (int j = i + 1; j < A.cols; j++)
            A.at<double>(i, j) = 0.0;
-   EXPECT_LE(norm(refA, A*A.t(), CV_RELATIVE_L2), FLT_EPSILON);
+   EXPECT_LE(cvtest::norm(refA, A*A.t(), CV_RELATIVE_L2), FLT_EPSILON);
 }
 
 TEST(Core_QR_Solver, accuracy64f)
@@ -3099,7 +3104,7 @@ TEST(Core_QR_Solver, accuracy64f)
 
     //solve system with square matrix
     solve(A, B, solutionQR, DECOMP_QR);
-    EXPECT_LE(norm(A*solutionQR, B, CV_RELATIVE_L2), FLT_EPSILON);
+    EXPECT_LE(cvtest::norm(A*solutionQR, B, CV_RELATIVE_L2), FLT_EPSILON);
 
     A = Mat(m, n, CV_64F);
     B = Mat(m, n, CV_64F);
@@ -3108,13 +3113,13 @@ TEST(Core_QR_Solver, accuracy64f)
 
     //solve normal system
     solve(A, B, solutionQR, DECOMP_QR | DECOMP_NORMAL);
-    EXPECT_LE(norm(A.t()*(A*solutionQR), A.t()*B, CV_RELATIVE_L2), FLT_EPSILON);
+    EXPECT_LE(cvtest::norm(A.t()*(A*solutionQR), A.t()*B, CV_RELATIVE_L2), FLT_EPSILON);
 
     //solve overdeterminated system as a least squares problem
     Mat solutionSVD;
     solve(A, B, solutionQR, DECOMP_QR);
     solve(A, B, solutionSVD, DECOMP_SVD);
-    EXPECT_LE(norm(solutionQR, solutionSVD, CV_RELATIVE_L2), FLT_EPSILON);
+    EXPECT_LE(cvtest::norm(solutionQR, solutionSVD, CV_RELATIVE_L2), FLT_EPSILON);
 
     //solve system with singular matrix
     A = Mat(10, 10, CV_64F);
@@ -3124,6 +3129,75 @@ TEST(Core_QR_Solver, accuracy64f)
     for (int i = 0; i < A.cols; i++)
       A.at<double>(0, i) = A.at<double>(1, i);
     ASSERT_FALSE(solve(A, B, solutionQR, DECOMP_QR));
+}
+
+TEST(Core_Solve, regression_11888)
+{
+    cv::Matx<float, 3, 2> A(
+        2, 1,
+        3, 1,
+        6, 1
+    );
+    cv::Vec<float, 3> b(4, 5, 7);
+    cv::Matx<float, 2, 1> xQR = A.solve(b, DECOMP_QR);
+    cv::Matx<float, 2, 1> xSVD = A.solve(b, DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(xQR, xSVD, NORM_L2 | NORM_RELATIVE), 0.001);
+    cv::Matx<float, 2, 3> iA = A.inv(DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(iA*A, Matx<float, 2, 2>::eye(), NORM_L2), 1e-3);
+    EXPECT_ANY_THROW({
+       /*cv::Matx<float, 2, 1> xLU =*/ A.solve(b, DECOMP_LU);
+       std::cout << "FATAL ERROR" << std::endl;
+    });
+}
+
+TEST(Core_Solve, Matx_2_2)
+{
+    cv::Matx<float, 2, 2> A(
+        2, 1,
+        1, 1
+    );
+    cv::Vec<float, 2> b(4, 5);
+    cv::Matx<float, 2, 1> xLU = A.solve(b, DECOMP_LU);
+    cv::Matx<float, 2, 1> xQR = A.solve(b, DECOMP_QR);
+    cv::Matx<float, 2, 1> xSVD = A.solve(b, DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(xQR, xSVD, NORM_L2 | NORM_RELATIVE), 1e-3);
+    EXPECT_LE(cvtest::norm(xQR, xLU, NORM_L2 | NORM_RELATIVE), 1e-3);
+    cv::Matx<float, 2, 2> iA = A.inv(DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(iA*A, Matx<float, 2, 2>::eye(), NORM_L2), 1e-3);
+}
+TEST(Core_Solve, Matx_3_3)
+{
+    cv::Matx<float, 3, 3> A(
+        2, 1, 0,
+        0, 1, 1,
+        1, 0, 1
+    );
+    cv::Vec<float, 3> b(4, 5, 6);
+    cv::Matx<float, 3, 1> xLU = A.solve(b, DECOMP_LU);
+    cv::Matx<float, 3, 1> xQR = A.solve(b, DECOMP_QR);
+    cv::Matx<float, 3, 1> xSVD = A.solve(b, DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(xQR, xSVD, NORM_L2 | NORM_RELATIVE), 1e-3);
+    EXPECT_LE(cvtest::norm(xQR, xLU, NORM_L2 | NORM_RELATIVE), 1e-3);
+    cv::Matx<float, 3, 3> iA = A.inv(DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(iA*A, Matx<float, 3, 3>::eye(), NORM_L2), 1e-3);
+}
+
+TEST(Core_Solve, Matx_4_4)
+{
+    cv::Matx<float, 4, 4> A(
+        2, 1, 0, 4,
+        0, 1, 1, 3,
+        1, 0, 1, 2,
+        2, 2, 0, 1
+    );
+    cv::Vec<float, 4> b(4, 5, 6, 7);
+    cv::Matx<float, 4, 1> xLU = A.solve(b, DECOMP_LU);
+    cv::Matx<float, 4, 1> xQR = A.solve(b, DECOMP_QR);
+    cv::Matx<float, 4, 1> xSVD = A.solve(b, DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(xQR, xSVD, NORM_L2 | NORM_RELATIVE), 1e-3);
+    EXPECT_LE(cvtest::norm(xQR, xLU, NORM_L2 | NORM_RELATIVE), 1e-3);
+    cv::Matx<float, 4, 4> iA = A.inv(DECOMP_SVD);
+    EXPECT_LE(cvtest::norm(iA*A, Matx<float, 4, 4>::eye(), NORM_L2), 1e-3);
 }
 
 softdouble naiveExp(softdouble x)
@@ -3718,7 +3792,7 @@ TEST(Core_SoftFloat, sincos64)
         softdouble x = inputs[i];
 
         int xexp = x.getExp();
-        softdouble randEps = eps.setExp(max(xexp-52, -46));
+        softdouble randEps = eps.setExp(std::max(xexp-52, -46));
         softdouble sx = sin(x);
         softdouble cx = cos(x);
         ASSERT_FALSE(sx.isInf()); ASSERT_FALSE(cx.isInf());
@@ -3862,4 +3936,5 @@ TEST(Core_SoftFloat, CvRound)
     }
 }
 
+}} // namespace
 /* End of file. */

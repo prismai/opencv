@@ -40,9 +40,8 @@
 //
 //M*/
 
+#include "precomp.hpp"
 #include "exif.hpp"
-#include "opencv2/core/cvdef.h"
-#include "opencv2/core/base.hpp"
 
 namespace {
 
@@ -176,7 +175,6 @@ std::map<int, ExifEntry_t > ExifReader::getExif()
                     CV_THROW (ExifParsingError());
                 }
                 m_stream.read( reinterpret_cast<char*>(&m_data[0]), exifSize - offsetToTiffHeader );
-                count = m_stream.gcount();
                 exifFound = true;
                 break;
 
@@ -480,7 +478,6 @@ uint32_t ExifReader::getU32(const size_t offset) const
  */
 u_rational_t ExifReader::getURational(const size_t offset) const
 {
-    u_rational_t result;
     uint32_t numerator = getU32( offset );
     uint32_t denominator = getU32( offset + 4 );
 

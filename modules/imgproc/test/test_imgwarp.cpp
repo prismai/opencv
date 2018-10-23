@@ -41,8 +41,7 @@
 
 #include "test_precomp.hpp"
 
-using namespace cv;
-using namespace std;
+namespace opencv_test { namespace {
 
 class CV_ImgWarpBaseTest : public cvtest::ArrayTest
 {
@@ -1419,7 +1418,7 @@ static void check_resize_area(const Mat& expected, const Mat& actual, double tol
         for (int dx = 0; dx < dsize.width && next; ++dx)
             if (fabs(static_cast<double>(aD[dx] - eD[dx])) > tolerance)
             {
-                cvtest::TS::ptr()->printf(cvtest::TS::SUMMARY, "Inf norm: %f\n", static_cast<float>(norm(actual, expected, NORM_INF)));
+                cvtest::TS::ptr()->printf(cvtest::TS::SUMMARY, "Inf norm: %f\n", static_cast<float>(cvtest::norm(actual, expected, NORM_INF)));
                 cvtest::TS::ptr()->printf(cvtest::TS::SUMMARY, "Error in : (%d, %d)\n", dx, dy);
 
                 const int radius = 3;
@@ -1434,7 +1433,7 @@ static void check_resize_area(const Mat& expected, const Mat& actual, double tol
             }
     }
 
-    ASSERT_EQ(0, norm(one_channel_diff, cv::NORM_INF));
+    ASSERT_EQ(0, cvtest::norm(one_channel_diff, cv::NORM_INF));
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1736,11 +1735,11 @@ TEST(Imgproc_Warp, multichannel)
 
         Mat rot = getRotationMatrix2D(Point2f(0.f, 0.f), 1.0, 1.0);
         warpAffine(src, dst, rot, src.size(), inter, border);
-        ASSERT_EQ(0.0, norm(dst, NORM_INF));
+        ASSERT_EQ(0.0, cvtest::norm(dst, NORM_INF));
         Mat rot2 = Mat::eye(3, 3, rot.type());
         rot.copyTo(rot2.rowRange(0, 2));
         warpPerspective(src, dst, rot2, src.size(), inter, border);
-        ASSERT_EQ(0.0, norm(dst, NORM_INF));
+        ASSERT_EQ(0.0, cvtest::norm(dst, NORM_INF));
     }
 }
 
@@ -1755,7 +1754,7 @@ TEST(Imgproc_GetAffineTransform, singularity)
     B_sample[1] = Point2f(15.0113f, 12.8994f);
     B_sample[2] = Point2f(38.9943f, 9.56297f);
     Mat trans = getAffineTransform(A_sample, B_sample);
-    ASSERT_EQ(0.0, norm(trans, NORM_INF));
+    ASSERT_EQ(0.0, cvtest::norm(trans, NORM_INF));
 }
 
 TEST(Imgproc_Remap, DISABLED_memleak)
@@ -1782,7 +1781,7 @@ TEST(Imgproc_Remap, DISABLED_memleak)
     }
 }
 
-
+//** @deprecated */
 TEST(Imgproc_linearPolar, identity)
 {
     const int N = 33;
@@ -1822,7 +1821,7 @@ TEST(Imgproc_linearPolar, identity)
 #endif
 }
 
-
+//** @deprecated */
 TEST(Imgproc_logPolar, identity)
 {
     const int N = 33;
@@ -1863,5 +1862,52 @@ TEST(Imgproc_logPolar, identity)
 #endif
 }
 
+TEST(Imgproc_warpPolar, identity)
+{
+    const int N = 33;
+    Mat in(N, N, CV_8UC3, Scalar(255, 0, 0));
+    in(cv::Rect(N / 3, N / 3, N / 3, N / 3)).setTo(Scalar::all(255));
+    cv::blur(in, in, Size(5, 5));
+    cv::blur(in, in, Size(5, 5));
 
+    Mat src = in.clone();
+    Mat dst;
+
+    Rect roi = Rect(0, 0, in.cols - ((N + 19) / 20), in.rows);
+    Point2f center = Point2f((N - 1) * 0.5f, (N - 1) * 0.5f);
+    double radius = N * 0.5;
+    int flags = CV_WARP_FILL_OUTLIERS | CV_INTER_LINEAR;
+    // test linearPolar
+    for (int ki = 1; ki <= 5; ki++)
+    {
+        warpPolar(src, dst, src.size(), center, radius, flags + WARP_POLAR_LINEAR + CV_WARP_INVERSE_MAP);
+        warpPolar(dst, src, src.size(), center, radius, flags + WARP_POLAR_LINEAR);
+
+        double psnr = cv::PSNR(in(roi), src(roi));
+        EXPECT_LE(25, psnr) << "iteration=" << ki;
+    }
+    // test logPolar
+    src = in.clone();
+    for (int ki = 1; ki <= 5; ki++)
+    {
+        warpPolar(src, dst, src.size(),center, radius, flags + WARP_POLAR_LOG + CV_WARP_INVERSE_MAP );
+        warpPolar(dst, src, src.size(),center, radius, flags + WARP_POLAR_LOG);
+
+        double psnr = cv::PSNR(in(roi), src(roi));
+        EXPECT_LE(25, psnr) << "iteration=" << ki;
+    }
+
+#if 0
+    Mat all(N*2+2,N*2+2, src.type(), Scalar(0,0,255));
+    in.copyTo(all(Rect(0,0,N,N)));
+    src.copyTo(all(Rect(0,N+1,N,N)));
+    src.copyTo(all(Rect(N+1,0,N,N)));
+    dst.copyTo(all(Rect(N+1,N+1,N,N)));
+    imwrite("linearPolar.png", all);
+    imshow("input", in); imshow("result", dst); imshow("restore", src); imshow("all", all);
+    cv::waitKey();
+#endif
+}
+
+}} // namespace
 /* End of file. */
