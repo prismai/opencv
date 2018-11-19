@@ -1,3 +1,10 @@
+# FIXME: Rework standalone build in more generic maner
+# (Restructure directories, add common pass, etc)
+if (NOT DEFINED OPENCV_INITIAL_PASS)
+    include("cmake/standalone.cmake")
+    return()
+endif()
+
 # FIXME: Remove CXX11 check after complete switch to OpenCV 4 branch
 # (CI, bundle, workloads, etc)
 if (NOT HAVE_CXX11 OR NOT TARGET ade)
@@ -15,6 +22,7 @@ file(GLOB gapi_ext_hdrs
     "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/*.h"
     "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/util/*.hpp"
     "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/cpu/*.hpp"
+    "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/gpu/*.hpp"
     "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/fluid/*.hpp"
     "${CMAKE_CURRENT_LIST_DIR}/include/opencv2/${name}/own/*.hpp"
     )
@@ -61,12 +69,21 @@ set(gapi_srcs
     src/backends/fluid/gfluidbuffer.cpp
     src/backends/fluid/gfluidbackend.cpp
     src/backends/fluid/gfluidimgproc.cpp
+    src/backends/fluid/gfluidimgproc_func.dispatch.cpp
     src/backends/fluid/gfluidcore.cpp
+
+    # GPU Backend (currently built-in)
+    src/backends/gpu/ggpubackend.cpp
+    src/backends/gpu/ggpukernel.cpp
+    src/backends/gpu/ggpuimgproc.cpp
+    src/backends/gpu/ggpucore.cpp
 
     # Compound
     src/backends/common/gcompoundbackend.cpp
     src/backends/common/gcompoundkernel.cpp
     )
+
+ocv_add_dispatched_file(backends/fluid/gfluidimgproc_func SSE4_1 AVX2)
 
 ocv_list_add_prefix(gapi_srcs "${CMAKE_CURRENT_LIST_DIR}/")
 
@@ -92,3 +109,4 @@ if(TARGET opencv_test_gapi)
 endif()
 
 ocv_add_perf_tests()
+ocv_add_samples()

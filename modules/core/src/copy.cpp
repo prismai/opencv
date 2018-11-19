@@ -287,23 +287,19 @@ void Mat::copyTo( OutputArray _dst ) const
 
         if( rows > 0 && cols > 0 )
         {
-            // For some cases (with vector) dst.size != src.size, so force to column-based form
-            // It prevents memory corruption in case of column-based src
-            if (_dst.isVector())
-                dst = dst.reshape(0, (int)dst.total());
+            Mat src = *this;
+            Size sz = getContinuousSize2D(src, dst, (int)elemSize());
+            CV_CheckGE(sz.width, 0, "");
 
-            const uchar* sptr = data;
+            const uchar* sptr = src.data;
             uchar* dptr = dst.data;
 
 #if IPP_VERSION_X100 >= 201700
-            CV_IPP_RUN_FAST(CV_INSTRUMENT_FUN_IPP(ippiCopy_8u_C1R_L, sptr, (int)step, dptr, (int)dst.step, ippiSizeL((int)(cols*elemSize()), rows)) >= 0)
+            CV_IPP_RUN_FAST(CV_INSTRUMENT_FUN_IPP(ippiCopy_8u_C1R_L, sptr, (int)src.step, dptr, (int)dst.step, ippiSizeL(sz.width, sz.height)) >= 0)
 #endif
 
-            Size sz = getContinuousSize(*this, dst);
-            size_t len = sz.width*elemSize();
-
-            for( ; sz.height--; sptr += step, dptr += dst.step )
-                memcpy( dptr, sptr, len );
+            for (; sz.height--; sptr += src.step, dptr += dst.step)
+                memcpy(dptr, sptr, sz.width);
         }
         return;
     }
@@ -328,7 +324,7 @@ void Mat::copyTo( OutputArray _dst ) const
 #ifdef HAVE_IPP
 static bool ipp_copyTo(const Mat &src, Mat &dst, const Mat &mask)
 {
-#ifdef HAVE_IPP_IW
+#ifdef HAVE_IPP_IW_LL
     CV_INSTRUMENT_REGION_IPP();
 
     if(mask.channels() > 1 || mask.depth() != CV_8U)
@@ -403,8 +399,9 @@ void Mat::copyTo( OutputArray _dst, InputArray _mask ) const
 
     if( dims <= 2 )
     {
-        Size sz = getContinuousSize(*this, dst, mask, mcn);
-        copymask(data, step, mask.data, mask.step, dst.data, dst.step, sz, &esz);
+        Mat src = *this;
+        Size sz = getContinuousSize2D(src, dst, mask, mcn);
+        copymask(src.data, src.step, mask.data, mask.step, dst.data, dst.step, sz, &esz);
         return;
     }
 
@@ -463,7 +460,7 @@ Mat& Mat::operator = (const Scalar& s)
 #ifdef HAVE_IPP
 static bool ipp_Mat_setTo_Mat(Mat &dst, Mat &_val, Mat &mask)
 {
-#ifdef HAVE_IPP_IW
+#ifdef HAVE_IPP_IW_LL
     CV_INSTRUMENT_REGION_IPP();
 
     if(mask.empty())
@@ -1152,7 +1149,7 @@ namespace cv {
 static bool ipp_copyMakeBorder( Mat &_src, Mat &_dst, int top, int bottom,
                                 int left, int right, int _borderType, const Scalar& value )
 {
-#if defined HAVE_IPP_IW && !IPP_DISABLE_PERF_COPYMAKE
+#if defined HAVE_IPP_IW_LL && !IPP_DISABLE_PERF_COPYMAKE
     CV_INSTRUMENT_REGION_IPP();
 
     ::ipp::IwiBorderSize borderSize(left, top, right, bottom);
@@ -1186,9 +1183,9 @@ void cv::copyMakeBorder( InputArray _src, OutputArray _dst, int top, int bottom,
 {
     CV_INSTRUMENT_REGION();
 
-    CV_Assert( top >= 0 && bottom >= 0 && left >= 0 && right >= 0 );
+    CV_Assert( top >= 0 && bottom >= 0 && left >= 0 && right >= 0 && _src.dims() <= 2);
 
-    CV_OCL_RUN(_dst.isUMat() && _src.dims() <= 2,
+    CV_OCL_RUN(_dst.isUMat(),
                ocl_copyMakeBorder(_src, _dst, top, bottom, left, right, borderType, value))
 
     Mat src = _src.getMat();

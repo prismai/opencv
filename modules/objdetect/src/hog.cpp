@@ -240,6 +240,7 @@ void HOGDescriptor::computeGradient(InputArray _img, InputOutputArray _grad, Inp
     CV_INSTRUMENT_REGION();
 
     Mat img = _img.getMat();
+    CV_Assert(!img.empty());
     CV_Assert( img.type() == CV_8U || img.type() == CV_8UC3 );
 
     Size gradsize(img.cols + paddingTL.width + paddingBR.width,
@@ -2116,62 +2117,6 @@ void HOGDescriptor::detectMultiScale(InputArray img, std::vector<Rect>& foundLoc
     detectMultiScale(img, foundLocations, foundWeights, hitThreshold, winStride,
                 padding, scale0, finalThreshold, useMeanshiftGrouping);
 }
-
-template<typename _ClsName> struct RTTIImpl
-{
-public:
-    static int isInstance(const void* ptr)
-    {
-        static _ClsName dummy;
-        static void* dummyp = &dummy;
-        union
-        {
-            const void* p;
-            const void** pp;
-        } a, b;
-        a.p = dummyp;
-        b.p = ptr;
-        return *a.pp == *b.pp;
-    }
-    static void release(void** dbptr)
-    {
-        if(dbptr && *dbptr)
-        {
-            delete (_ClsName*)*dbptr;
-            *dbptr = 0;
-        }
-    }
-    static void* read(CvFileStorage* fs, CvFileNode* n)
-    {
-        FileNode fn(fs, n);
-        _ClsName* obj = new _ClsName;
-        if(obj->read(fn))
-            return obj;
-        delete obj;
-        return 0;
-    }
-
-    static void write(CvFileStorage* _fs, const char* name, const void* ptr, CvAttrList)
-    {
-        if(ptr && _fs)
-        {
-            FileStorage fs(_fs, false);
-            ((const _ClsName*)ptr)->write(fs, String(name));
-        }
-    }
-
-    static void* clone(const void* ptr)
-    {
-        if(!ptr)
-            return 0;
-        return new _ClsName(*(const _ClsName*)ptr);
-    }
-};
-
-typedef RTTIImpl<HOGDescriptor> HOGRTTI;
-
-CvType hog_type( CV_TYPE_NAME_HOG_DESCRIPTOR, HOGRTTI::isInstance,
-    HOGRTTI::release, HOGRTTI::read, HOGRTTI::write, HOGRTTI::clone);
 
 std::vector<float> HOGDescriptor::getDefaultPeopleDetector()
 {

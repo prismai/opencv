@@ -1532,6 +1532,7 @@ icvFindContoursInInterval( const CvArr* src,
     tmp_prev->link = 0;
 
     // First line. None of runs is binded
+    tmp.pt.x = 0;
     tmp.pt.y = 0;
     CV_WRITE_SEQ_ELEM( tmp, writer );
     upper_line = (CvLinkedRunPoint*)CV_GET_WRITTEN_ELEM( writer );
@@ -1820,7 +1821,7 @@ cvFindContours_Impl( void*  img,  CvMemStorage*  storage,
     }
     else
     {
-        CV_TRY
+        try
         {
             scanner = cvStartFindContours_Impl( img, storage, cntHeaderSize, mode, method, offset,
                                             needFillBorder);
@@ -1832,11 +1833,11 @@ cvFindContours_Impl( void*  img,  CvMemStorage*  storage,
             }
             while( contour != 0 );
         }
-        CV_CATCH_ALL
+        catch(...)
         {
             if( scanner )
                 cvEndFindContours(&scanner);
-            CV_RETHROW();
+            throw;
         }
 
         *firstContour = cvEndFindContours( &scanner );

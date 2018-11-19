@@ -180,6 +180,8 @@ T* allocSingleton(size_t count = 1) { return static_cast<T*>(allocSingletonBuffe
 *                     Structures and macros for integration with IPP                     *
 \****************************************************************************************/
 
+#define OPENCV_IPP_REDUCE_SIZE 1
+
 // Temporary disabled named IPP region. Accuracy
 #define IPP_DISABLE_PYRAMIDS_UP         1 // Different results
 #define IPP_DISABLE_PYRAMIDS_DOWN       1 // Different results
@@ -194,8 +196,8 @@ T* allocSingleton(size_t count = 1) { return static_cast<T*>(allocSingletonBuffe
 #define IPP_DISABLE_LAB_RGB             1 // breaks OCL accuracy tests
 #define IPP_DISABLE_RGB_XYZ             1 // big accuracy difference
 #define IPP_DISABLE_XYZ_RGB             1 // big accuracy difference
-#define IPP_DISABLE_HAAR                1 // improper integration/results
 #define IPP_DISABLE_HOUGH               1 // improper integration/results
+#define IPP_DISABLE_FILTER2D_BIG_MASK   1 // different results on masks > 7x7
 
 #define IPP_DISABLE_GAUSSIANBLUR_PARALLEL 1 // not supported (2017u2 / 2017u3)
 
@@ -229,7 +231,9 @@ T* allocSingleton(size_t count = 1) { return static_cast<T*>(allocSingletonBuffe
 #  pragma GCC diagnostic ignored "-Wsuggest-override"
 #  endif
 #include "iw++/iw.hpp"
+#  ifdef HAVE_IPP_IW_LL
 #include "iw/iw_ll.h"
+#  endif
 #  if defined(__OPENCV_BUILD) && defined(__GNUC__) && __GNUC__ >= 5
 #  pragma GCC diagnostic pop
 #  endif
@@ -789,6 +793,82 @@ CV_EXPORTS InstrNode*   getCurrentNode();
 #else
 #define CV_INSTRUMENT_REGION(); CV_INSTRUMENT_REGION_();
 #endif
+
+namespace cv {
+
+namespace utils {
+
+//! @addtogroup core_utils
+//! @{
+
+/** @brief Try to find requested data file
+
+Search directories:
+
+1. Directories passed via `addDataSearchPath()`
+2. Check path specified by configuration parameter with "_HINT" suffix (name of environment variable).
+3. Check path specified by configuration parameter (name of environment variable).
+   If parameter value is not empty and nothing is found then stop searching.
+4. Detects build/install path based on:
+   a. current working directory (CWD)
+   b. and/or binary module location (opencv_core/opencv_world, doesn't work with static linkage)
+5. Scan `<source>/{,data}` directories if build directory is detected or the current directory is in source tree.
+6. Scan `<install>/share/OpenCV` directory if install directory is detected.
+
+@param relative_path Relative path to data file
+@param required Specify "file not found" handling.
+       If true, function prints information message and raises cv::Exception.
+       If false, function returns empty result
+@param configuration_parameter specify configuration parameter name. Default NULL value means "OPENCV_DATA_PATH".
+@return Returns path (absolute or relative to the current directory) or empty string if file is not found
+
+@note Implementation is not thread-safe.
+*/
+CV_EXPORTS
+cv::String findDataFile(const cv::String& relative_path, bool required = true,
+                        const char* configuration_parameter = NULL);
+
+/** @overload
+@param relative_path Relative path to data file
+@param configuration_parameter specify configuration parameter name. Default NULL value means "OPENCV_DATA_PATH".
+@param search_paths override addDataSearchPath() settings.
+@param subdir_paths override addDataSearchSubDirectory() settings.
+@return Returns path (absolute or relative to the current directory) or empty string if file is not found
+
+@note Implementation is not thread-safe.
+*/
+CV_EXPORTS
+cv::String findDataFile(const cv::String& relative_path,
+                        const char* configuration_parameter,
+                        const std::vector<String>* search_paths,
+                        const std::vector<String>* subdir_paths);
+
+/** @brief Override default search data path by adding new search location
+
+Use this only to override default behavior
+Passed paths are used in LIFO order.
+
+@param path Path to used samples data
+
+@note Implementation is not thread-safe.
+*/
+CV_EXPORTS void addDataSearchPath(const cv::String& path);
+
+/** @brief Append default search data sub directory
+
+General usage is to add OpenCV modules name (`<opencv_contrib>/modules/<name>/data` -> `modules/<name>/data` + `<name>/data`).
+Passed subdirectories are used in LIFO order.
+
+@param subdir samples data sub directory
+
+@note Implementation is not thread-safe.
+*/
+CV_EXPORTS void addDataSearchSubDirectory(const cv::String& subdir);
+
+//! @}
+
+} // namespace utils
+} // namespace cv
 
 //! @endcond
 

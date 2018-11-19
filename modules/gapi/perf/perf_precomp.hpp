@@ -16,6 +16,10 @@
 #include "opencv2/gapi/imgproc.hpp"
 #include "opencv2/gapi/core.hpp"
 #include "opencv2/gapi/cpu/gcpukernel.hpp"
+#include "opencv2/gapi/gpu/ggpukernel.hpp"
 #include "opencv2/gapi/operators.hpp"
 
-#endif
+#include "opencv2/gapi/fluid/core.hpp"
+#include "opencv2/gapi/fluid/imgproc.hpp"
+
+#endif // __OPENCV_GAPI_PERF_PRECOMP_HPP__

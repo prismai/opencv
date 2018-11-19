@@ -250,6 +250,19 @@ CV_EXPORTS_W bool imencode( const String& ext, InputArray img,
                             CV_OUT std::vector<uchar>& buf,
                             const std::vector<int>& params = std::vector<int>());
 
+/** @brief Returns true if the specified image can be decoded by OpenCV
+
+@param filename File name of the image
+*/
+CV_EXPORTS_W bool haveImageReader( const String& filename );
+
+/** @brief Returns true if an image with the specified filename can be encoded by OpenCV
+
+ @param filename File name of the image
+ */
+CV_EXPORTS_W bool haveImageWriter( const String& filename );
+
+
 //! @} imgcodecs
 
 } // cv

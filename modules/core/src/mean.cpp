@@ -8,6 +8,12 @@
 #include "opencv2/core/openvx/ovx_defs.hpp"
 #include "stat.hpp"
 
+#undef HAVE_IPP
+#undef CV_IPP_RUN_FAST
+#define CV_IPP_RUN_FAST(f, ...)
+#undef CV_IPP_RUN
+#define CV_IPP_RUN(c, f, ...)
+
 #if defined HAVE_IPP
 namespace cv
 {
@@ -648,11 +654,11 @@ static bool ocl_meanStdDev( InputArray _src, OutputArray _mean, OutputArray _sdv
                     pstddev[c] = 0;
             }
         }
-        catch (ivx::RuntimeError & e)
+        catch (const ivx::RuntimeError & e)
         {
             VX_DbgThrow(e.what());
         }
-        catch (ivx::WrapperError & e)
+        catch (const ivx::WrapperError & e)
         {
             VX_DbgThrow(e.what());
         }
@@ -673,6 +679,24 @@ static bool ipp_meanStdDev(Mat& src, OutputArray _mean, OutputArray _sdv, Mat& m
     // IPP_DISABLE: C3C functions can read outside of allocated memory
     if (cn > 1)
         return false;
+#endif
+#if IPP_VERSION_X100 >= 201900 && IPP_VERSION_X100 < 201901
+    // IPP_DISABLE: 32f C3C functions can read outside of allocated memory
+    if (cn > 1 && src.depth() == CV_32F)
+        return false;
+
+    // SSE4.2 buffer overrun
+#if defined(_WIN32) && !defined(_WIN64)
+    // IPPICV doesn't have AVX2 in 32-bit builds
+    // However cv::ipp::getIppTopFeatures() may return AVX2 value on AVX2 capable H/W
+    // details #12959
+#else
+    if (cv::ipp::getIppTopFeatures() == ippCPUID_SSE42) // Linux x64 + OPENCV_IPP=SSE42 is affected too
+#endif
+    {
+        if (src.depth() == CV_32F && src.dims > 1 && src.size[src.dims - 1] == 6)
+            return false;
+    }
 #endif
 
     size_t total_size = src.total();
