@@ -1579,7 +1579,7 @@ static AVStream *icv_add_video_stream_FFMPEG(AVFormatContext *oc,
 
     /* put sample parameters */
     int64_t lbit_rate = (int64_t)bitrate;
-    //lbit_rate += (bitrate / 2);
+//    lbit_rate += (bitrate / 2);
     lbit_rate = std::min(lbit_rate, (int64_t)INT_MAX);
     c->bit_rate = lbit_rate;
 
