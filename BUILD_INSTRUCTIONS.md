@@ -42,5 +42,5 @@ make install
 ## iOS Build Instructions
 
 ```
-python opencv/platforms/ios/build_framework.py ios --contrib opencv_contrib/
+BUILD_PRECOMMIT=1 python opencv/platforms/ios/build_framework.py ios --iphoneos_archs arm64 --contrib opencv_contrib/
 ```

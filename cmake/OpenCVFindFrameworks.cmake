@@ -11,7 +11,7 @@ endif(WITH_HPX)
 
 # --- GCD ---
 if(APPLE AND NOT HAVE_TBB)
-  set(HAVE_GCD 0)
+  set(HAVE_GCD 1)
 else()
   set(HAVE_GCD 0)
 endif()
@@ -42,3 +42,6 @@ if(WITH_PTHREADS_PF AND HAVE_PTHREAD)
 else()
   set(HAVE_PTHREADS_PF 0)
 endif()
+
+set(HAVE_GCD 0)
+set(HAVE_PTHREADS_PF 0)
