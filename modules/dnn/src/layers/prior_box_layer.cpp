@@ -43,6 +43,7 @@
 #include "../precomp.hpp"
 #include "layers_common.hpp"
 #include "../op_inf_engine.hpp"
+#include "../op_vkcom.hpp"
 #include <float.h>
 #include <algorithm>
 #include <cmath>
@@ -271,7 +272,8 @@ public:
     virtual bool supportBackend(int backendId) CV_OVERRIDE
     {
         return backendId == DNN_BACKEND_OPENCV ||
-               backendId == DNN_BACKEND_INFERENCE_ENGINE && haveInfEngine();
+               (backendId == DNN_BACKEND_INFERENCE_ENGINE && haveInfEngine()) ||
+               (backendId == DNN_BACKEND_VKCOM && haveVulkan());
     }
 
     bool getMemoryShapes(const std::vector<MatShape> &inputs,
@@ -297,15 +299,18 @@ public:
         return false;
     }
 
-    void finalize(const std::vector<Mat*> &inputs, std::vector<Mat> &outputs) CV_OVERRIDE
+    void finalize(InputArrayOfArrays inputs_arr, OutputArrayOfArrays) CV_OVERRIDE
     {
-        CV_CheckGT(inputs.size(), (size_t)1, "");
-        CV_CheckEQ(inputs[0]->dims, 4, ""); CV_CheckEQ(inputs[1]->dims, 4, "");
-        int layerWidth = inputs[0]->size[3];
-        int layerHeight = inputs[0]->size[2];
+        std::vector<Mat> inputs;
+        inputs_arr.getMatVector(inputs);
 
-        int imageWidth = inputs[1]->size[3];
-        int imageHeight = inputs[1]->size[2];
+        CV_CheckGT(inputs.size(), (size_t)1, "");
+        CV_CheckEQ(inputs[0].dims, 4, ""); CV_CheckEQ(inputs[1].dims, 4, "");
+        int layerWidth = inputs[0].size[3];
+        int layerHeight = inputs[0].size[2];
+
+        int imageWidth = inputs[1].size[3];
+        int imageHeight = inputs[1].size[2];
 
         _stepY = _stepY == 0 ? (static_cast<float>(imageHeight) / layerHeight) : _stepY;
         _stepX = _stepX == 0 ? (static_cast<float>(imageWidth) / layerWidth) : _stepX;
@@ -399,25 +404,26 @@ public:
         CV_TRACE_FUNCTION();
         CV_TRACE_ARG_VALUE(name, "name", name.c_str());
 
-        CV_OCL_RUN(IS_DNN_OPENCL_TARGET(preferableTarget) &&
-                   OCL_PERFORMANCE_CHECK(ocl::Device::getDefault().isIntel()),
+        CV_OCL_RUN(IS_DNN_OPENCL_TARGET(preferableTarget),
                    forward_ocl(inputs_arr, outputs_arr, internals_arr))
 
-        Layer::forward_fallback(inputs_arr, outputs_arr, internals_arr);
-    }
+        if (inputs_arr.depth() == CV_16S)
+        {
+            forward_fallback(inputs_arr, outputs_arr, internals_arr);
+            return;
+        }
 
-    void forward(std::vector<Mat*> &inputs, std::vector<Mat> &outputs, std::vector<Mat> &internals) CV_OVERRIDE
-    {
-        CV_TRACE_FUNCTION();
-        CV_TRACE_ARG_VALUE(name, "name", name.c_str());
+        std::vector<Mat> inputs, outputs;
+        inputs_arr.getMatVector(inputs);
+        outputs_arr.getMatVector(outputs);
 
         CV_Assert(inputs.size() == 2);
 
-        int _layerWidth = inputs[0]->size[3];
-        int _layerHeight = inputs[0]->size[2];
+        int _layerWidth = inputs[0].size[3];
+        int _layerHeight = inputs[0].size[2];
 
-        int _imageWidth = inputs[1]->size[3];
-        int _imageHeight = inputs[1]->size[2];
+        int _imageWidth = inputs[1].size[3];
+        int _imageHeight = inputs[1].size[2];
 
         float* outputPtr = outputs[0].ptr<float>();
         float _boxWidth, _boxHeight;
@@ -453,8 +459,8 @@ public:
         outputPtr = outputs[0].ptr<float>(0, 1);
         if(_variance.size() == 1)
         {
-            Mat secondChannel(outputs[0].size[2], outputs[0].size[3], CV_32F, outputPtr);
-            secondChannel.setTo(Scalar(_variance[0]));
+            Mat secondChannel(1, outputs[0].size[2], CV_32F, outputPtr);
+            secondChannel.setTo(Scalar::all(_variance[0]));
         }
         else
         {
@@ -474,6 +480,19 @@ public:
                 }
             }
         }
+    }
+
+    virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> > &input) CV_OVERRIDE
+    {
+#ifdef HAVE_VULKAN
+        std::shared_ptr<vkcom::OpBase> op(new vkcom::OpPriorBox(_stepX, _stepY,
+                                                                _clip, _numPriors,
+                                                                _variance, _offsetsX,
+                                                                _offsetsY, _boxWidths,
+                                                                _boxHeights));
+        return Ptr<BackendNode>(new VkComBackendNode(input, op));
+#endif // HAVE_VULKAN
+        return Ptr<BackendNode>();
     }
 
     virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&) CV_OVERRIDE
@@ -541,7 +560,7 @@ public:
     virtual int64 getFLOPS(const std::vector<MatShape> &inputs,
                            const std::vector<MatShape> &outputs) const CV_OVERRIDE
     {
-        (void)outputs; // suppress unused variable warning
+        CV_UNUSED(outputs); // suppress unused variable warning
         long flops = 0;
 
         for (int i = 0; i < inputs.size(); i++)
