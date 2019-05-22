@@ -10,7 +10,7 @@ parse_cmd_line()
     for i in "$@"
     do
     case $i in
-        --u)
+        -u|--u)
         UPLOAD_PACKAGE=1;;
         *)
         ;;
