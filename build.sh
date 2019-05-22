@@ -40,7 +40,7 @@ cd install/opencv4
 
 CONAN_PRISM_PACKAGE_REFERENCE=opencv/4.1.0@bvnp43/stable
 
-conan export-pkg . ${CONAN_PRISM_PACKAGE_REFERENCE}
+conan export-pkg . ${CONAN_PRISM_PACKAGE_REFERENCE} -f
 
 if (( ${UPLOAD_PACKAGE} != 0 )); then
     conan remote add conan_prism ${CONAN_REMOTE_URL_CONAN_PRISM}
