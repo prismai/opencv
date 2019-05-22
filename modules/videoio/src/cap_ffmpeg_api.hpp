@@ -6,12 +6,16 @@ extern "C"
 {
 #endif
 
-#if defined _WIN32
+#ifndef OPENCV_FFMPEG_API
+#if defined(__OPENCV_BUILD) || defined(BUILD_PLUGIN)
+#   define OPENCV_FFMPEG_API
+#elif defined _WIN32
 #   define OPENCV_FFMPEG_API __declspec(dllexport)
 #elif defined __GNUC__ && __GNUC__ >= 4
 #   define OPENCV_FFMPEG_API __attribute__ ((visibility ("default")))
 #else
 #   define OPENCV_FFMPEG_API
+#endif
 #endif
 
 enum
@@ -41,7 +45,7 @@ OPENCV_FFMPEG_API int cvRetrieveFrame_FFMPEG(struct CvCapture_FFMPEG* capture, u
 OPENCV_FFMPEG_API void cvReleaseCapture_FFMPEG(struct CvCapture_FFMPEG** cap);
 
 OPENCV_FFMPEG_API struct CvVideoWriter_FFMPEG* cvCreateVideoWriter_FFMPEG(const char* filename,
-            int fourcc, double fps, int width, int height, int isColor, int bitrate );
+            int fourcc, double fps, int width, int height, int isColor, int bitrate);
 OPENCV_FFMPEG_API int cvWriteFrame_FFMPEG(struct CvVideoWriter_FFMPEG* writer, const unsigned char* data,
                                           int step, int width, int height, int cn, int origin);
 OPENCV_FFMPEG_API void cvReleaseVideoWriter_FFMPEG(struct CvVideoWriter_FFMPEG** writer);
