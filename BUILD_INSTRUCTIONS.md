@@ -1,45 +1,30 @@
 # OpenCV
 
-## Mac OS Build Instructions
-
-Install ffmpeg, you can do this by running `brew install ffmpeg`. Then run:
+For successful build you need to define environment variables in your .bash_profile:
 
 ```
-cd opencv
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_INSTALL_PREFIX=~/Desktop/opencv4 -DINSTALL_C_EXAMPLES=OFF \
-    -DINSTALL_PYTHON_EXAMPLES=OFF -DBUILD_EXAMPLES=OFF -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules/ \
-    -DBUILD_SHARED_LIBS=OFF -DWITH_TBB=OFF -DWITH_IPP=OFF -DWITH_IPP_A=OFF -DWITH_CUDA=OFF -DWITH_EIGEN=OFF -DWITH_CLP=OFF  \
-    -DWITH_CSTRIPES=OFF -DWITH_OPENMP=OFF -DWITH_PTHREADS_PF=OFF -DWITH_OPENCL=OFF \
-    -DWITH_GSTREAMER=OFF -DWITH_AVFOUNDATION=OFF -DWITH_FFMPEG=ON -DWITH_WEBP=OFF ..
-make -j8
-make install
+export CONAN_REMOTE_URL_CONAN_PRISM=http://18.237.155.206:9300
+export CONAN_LOGIN_USERNAME_CONAN_PRISM=bvnp43
+export CONAN_PASSWORD_CONAN_PRISM=**password**
 ```
 
-You will get opencv installed in `~/Desktop/opencv4`, navigate to that folder and create artifact by running:
+## Build Instructions
+
+Install ffmpeg, pkg-config and conan, you can do this by running - `brew install ffmpeg pkg-config` and `pip3 install conan`. Then run:
 
 ```
-tar -czvf opencv_4.0.1_macos.Release.tar.gz include/ lib/ share/
+./build.sh
 ```
 
-## Ubuntu Build Instructions
-
-Install ffmpeg. Then run:
+or
 
 ```
-cd opencv
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_INSTALL_PREFIX=~/Desktop/opencv4 -D INSTALL_C_EXAMPLES=OFF \
-    -DINSTALL_PYTHON_EXAMPLES=OFF -DBUILD_EXAMPLES=OFF -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules/ -DBUILD_SHARED_LIBS=OFF \
-    -DWITH_TBB=OFF -DWITH_IPP=OFF -DWITH_IPP_A=OFF -DWITH_CUDA=OFF -DWITH_EIGEN=OFF -DWITH_CLP=OFF -DWITH_CSTRIPES=OFF -DWITH_OPENMP=OFF \
-    -DWITH_PTHREADS_PF=OFF -DWITH_OPENCL=OFF -DWITH_GSTREAMER=OFF -DWITH_FFMPEG=ON -DWITH_WEBP=OFF ..
-make -j8
-make install
+./build.sh -u
 ```
 
-## iOS Build Instructions
+if you want to upload created packege to prism conan server.
+
+## iOS Build Instructions (Obsolete, we don't support ios atm)
 
 ```
 BUILD_PRECOMMIT=1 python opencv/platforms/ios/build_framework.py ios --iphoneos_archs arm64 --contrib opencv_contrib/
