@@ -792,7 +792,7 @@ void TFImporter::populateNet(Net dstNet)
         int predictedLayout = predictOutputDataLayout(net, layer, data_layouts);
         data_layouts[name] = predictedLayout;
 
-        if (type == "Conv2D" || type == "SpaceToBatchND" || type == "DepthwiseConv2dNative" || type == "Pad" || type == "Conv3D")
+        if (type == "Conv2D" || type == "SpaceToBatchND" || type == "DepthwiseConv2dNative" || type == "Pad" || type == "MirrorPad" || type == "Conv3D")
         {
             // The first node of dilated convolution subgraph.
             // Extract input node, dilation rate and paddings.
@@ -804,6 +804,7 @@ void TFImporter::populateNet(Net dstNet)
                 if (next_layers.empty())
                     next_layers = getNextLayers(net, name, "DepthwiseConv2dNative");
             }
+
             if (type == "SpaceToBatchND")
             {
                 // op: "SpaceToBatchND"
@@ -830,7 +831,7 @@ void TFImporter::populateNet(Net dstNet)
                 name = layer.name();
                 type = layer.op();
             }
-            else if (type == "Pad")
+            else if (type == "Pad" || type == "MirrorPad")
             {
                 Mat paddings = getTensorContent(getConstBlob(layer, value_id, 1));
                 CV_Assert(paddings.type() == CV_32SC1);
@@ -848,12 +849,15 @@ void TFImporter::populateNet(Net dstNet)
                     //  N    C    H    W
                     // 0 1  2 3  4 5  6 7
                 }
+
                 if (next_layers.empty() || paddings.total() != 8 ||
                     paddings.at<int32_t>(4) != paddings.at<int32_t>(5) ||
-                    paddings.at<int32_t>(6) != paddings.at<int32_t>(7))
+                    paddings.at<int32_t>(6) != paddings.at<int32_t>(7) || type == "MirrorPad")
                 {
                     // Just a single padding layer.
                     layerParams.set("paddings", DictValue::arrayInt<int*>((int*)paddings.data, paddings.total()));
+                    if (type == "MirrorPad")
+                        layerParams.set("type", "reflect");
 
                     int id = dstNet.addLayer(name, "Padding", layerParams);
                     layer_id[name] = id;
@@ -1366,6 +1370,24 @@ void TFImporter::populateNet(Net dstNet)
 
             connectToAllBlobs(layer_id, dstNet, parsePin(layer.input(0)), id, layer.input_size());
         }
+        else if (type == "MaxPoolGrad")
+        {
+            CV_Assert(layer.input_size() == 3);
+
+            layerParams.set("pool_k_h", 0);
+            layerParams.set("pool_k_w", 0);
+            layerParams.set("pool_stride_h", 0);
+            layerParams.set("pool_stride_w", 0);
+            layerParams.set("pool_pad_h", 0);
+            layerParams.set("pool_pad_w", 0);
+
+            int id = dstNet.addLayer(name, "MaxUnpool", layerParams);
+            layer_id[name] = id;
+
+            connect(layer_id, dstNet, parsePin(layer.input(2)), id, 0);
+            connect(layer_id, dstNet, parsePin(layer.input(1) + ":1"), id, 1);
+            connect(layer_id, dstNet, parsePin(layer.input(0)), id, 2);
+        }
         else if (type == "Placeholder")
         {
             if (!hasLayerAttr(layer, "dtype") ||
@@ -1387,6 +1409,9 @@ void TFImporter::populateNet(Net dstNet)
             if (getDataLayout(name, data_layouts) == DATA_LAYOUT_NHWC)
                 axis = toNCHW(axis);
             layerParams.set("axis", axis);
+
+            if (hasLayerAttr(layer, "num_split"))
+                layerParams.set("num_split", getLayerAttr(layer, "num_split").i());
 
             int id = dstNet.addLayer(name, "Slice", layerParams);
             layer_id[name] = id;
@@ -1417,6 +1442,43 @@ void TFImporter::populateNet(Net dstNet)
             }
             layerParams.set("begin", DictValue::arrayInt((int*)begins.data, begins.total()));
             layerParams.set("size", DictValue::arrayInt((int*)sizes.data, sizes.total()));
+
+            int id = dstNet.addLayer(name, "Slice", layerParams);
+            layer_id[name] = id;
+
+            connect(layer_id, dstNet, parsePin(layer.input(0)), id, 0);
+        }
+        else if (type == "StridedSlice")
+        {
+            CV_Assert(layer.input_size() == 4);
+            Mat begins = getTensorContent(getConstBlob(layer, value_id, 1));
+            Mat ends = getTensorContent(getConstBlob(layer, value_id, 2));
+            Mat strides = getTensorContent(getConstBlob(layer, value_id, 3));
+            CV_CheckTypeEQ(begins.type(), CV_32SC1, "");
+            CV_CheckTypeEQ(ends.type(), CV_32SC1, "");
+            CV_CheckTypeEQ(strides.type(), CV_32SC1, "");
+            const int num = begins.total();
+            CV_Assert_N(num == ends.total(), num == strides.total());
+
+            int end_mask = getLayerAttr(layer, "end_mask").i();
+            for (int i = 0; i < num; ++i)
+            {
+                if (end_mask & (1 << i))
+                    ends.at<int>(i) = -1;
+                if (strides.at<int>(i) != 1)
+                    CV_Error(Error::StsNotImplemented,
+                             format("StridedSlice with stride %d", strides.at<int>(i)));
+            }
+            if (begins.total() == 4 && getDataLayout(name, data_layouts) == DATA_LAYOUT_NHWC)
+            {
+                // Swap NHWC parameters' order to NCHW.
+                std::swap(begins.at<int>(2), begins.at<int>(3));
+                std::swap(begins.at<int>(1), begins.at<int>(2));
+                std::swap(ends.at<int>(2), ends.at<int>(3));
+                std::swap(ends.at<int>(1), ends.at<int>(2));
+            }
+            layerParams.set("begin", DictValue::arrayInt((int*)begins.data, begins.total()));
+            layerParams.set("end", DictValue::arrayInt((int*)ends.data, ends.total()));
 
             int id = dstNet.addLayer(name, "Slice", layerParams);
             layer_id[name] = id;
