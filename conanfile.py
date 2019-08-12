@@ -5,7 +5,7 @@ import os
 
 class OpencvConan(ConanFile):
     name = "opencv"
-    version = "4.1.0"
+    version = "4.1.1"
     settings = "os"
 
     def package(self):

@@ -11,7 +11,7 @@ parse_cmd_line()
     do
     case $i in
         -u|--u)
-        UPLOAD_PACKAGE=1;;
+        UPLOAD_PACKAGE=0;;
         *)
         ;;
     esac
@@ -38,7 +38,7 @@ cd ..
 cp conanfile.py install/opencv4
 cd install/opencv4
 
-CONAN_PRISM_PACKAGE_REFERENCE=opencv/4.1.0@bvnp43/stable
+CONAN_PRISM_PACKAGE_REFERENCE=opencv/4.1.1@bvnp43/stable
 
 conan export-pkg . ${CONAN_PRISM_PACKAGE_REFERENCE} -f
 
