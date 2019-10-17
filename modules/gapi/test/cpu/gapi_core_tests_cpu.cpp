@@ -251,7 +251,10 @@ INSTANTIATE_TEST_CASE_P(ThresholdTestCPU, ThresholdTest,
                                 Values(-1),
                                 Values(CORE_CPU),
                                 Values(cv::THRESH_BINARY, cv::THRESH_BINARY_INV, cv::THRESH_TRUNC,
-                                    cv::THRESH_TOZERO, cv::THRESH_TOZERO_INV)));
+                                       cv::THRESH_TOZERO, cv::THRESH_TOZERO_INV),
+                                Values(cv::Scalar(0, 0, 0, 0),
+                                       cv::Scalar(100, 100, 100, 100),
+                                       cv::Scalar(255, 255, 255, 255))));
 
 INSTANTIATE_TEST_CASE_P(ThresholdTestCPU, ThresholdOTTest,
                         Combine(Values(CV_8UC1),
@@ -364,6 +367,14 @@ INSTANTIATE_TEST_CASE_P(CropTestCPU, CropTest,
                                 Values(-1),
                                 Values(CORE_CPU),
                                 Values(cv::Rect(10, 8, 20, 35), cv::Rect(4, 10, 37, 50))));
+
+INSTANTIATE_TEST_CASE_P(CopyTestCPU, CopyTest,
+                        Combine(Values( CV_8UC1, CV_8UC3, CV_16UC1, CV_16SC1, CV_32FC1 ),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480),
+                                       cv::Size(128, 128)),
+                                Values(-1),
+                                Values(CORE_CPU)));
 
 INSTANTIATE_TEST_CASE_P(LUTTestCPU, LUTTest,
                         Combine(Values(CV_8UC1, CV_8UC3),
