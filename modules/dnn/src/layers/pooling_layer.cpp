@@ -163,13 +163,17 @@ public:
     {
         if (backendId == DNN_BACKEND_INFERENCE_ENGINE)
         {
+            if (computeMaxIdx)
+                return false;
 #ifdef HAVE_INF_ENGINE
             if (kernel_size.size() == 3)
                 return preferableTarget == DNN_TARGET_CPU;
             if (preferableTarget == DNN_TARGET_MYRIAD) {
+#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_LE(INF_ENGINE_RELEASE_2019R1)
                 if (type == MAX && (pad_l == 1 && pad_t == 1) && stride == Size(2, 2) ) {
                     return !isMyriadX();
                 }
+#endif
                 return type == MAX || type == AVE;
             }
             else
