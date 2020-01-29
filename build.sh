@@ -38,7 +38,7 @@ cd ..
 cp conanfile.py install/opencv4
 cd install/opencv4
 
-CONAN_PRISM_PACKAGE_REFERENCE=opencv/4.1.1@bvnp43/stable
+CONAN_PRISM_PACKAGE_REFERENCE=opencv/4.2.0@bvnp43/stable
 
 conan export-pkg . ${CONAN_PRISM_PACKAGE_REFERENCE} -f
 

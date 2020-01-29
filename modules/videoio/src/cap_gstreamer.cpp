@@ -1673,7 +1673,7 @@ bool CvVideoWriter_GStreamer::writeFrame( const IplImage * image )
     return true;
 }
 
-Ptr<IVideoWriter> create_GStreamer_writer(const std::string &filename, int fourcc, double fps, const cv::Size &frameSize, bool isColor)
+Ptr<IVideoWriter> create_GStreamer_writer(const std::string &filename, int fourcc, double fps, const cv::Size &frameSize, bool isColor, int bitrate)
 {
     CvVideoWriter_GStreamer* wrt = new CvVideoWriter_GStreamer;
     try
