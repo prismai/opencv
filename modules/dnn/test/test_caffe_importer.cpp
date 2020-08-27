@@ -168,7 +168,11 @@ typedef testing::TestWithParam<tuple<bool, Target> > Reproducibility_AlexNet;
 TEST_P(Reproducibility_AlexNet, Accuracy)
 {
     Target targetId = get<1>(GetParam());
+#if defined(OPENCV_32BIT_CONFIGURATION) && defined(HAVE_OPENCL)
+    applyTestTag(CV_TEST_TAG_MEMORY_2GB);
+#else
     applyTestTag(targetId == DNN_TARGET_CPU ? CV_TEST_TAG_MEMORY_512MB : CV_TEST_TAG_MEMORY_1GB);
+#endif
     ASSERT_TRUE(ocl::useOpenCL() || targetId == DNN_TARGET_CPU);
 
     bool readFromMemory = get<0>(GetParam());
@@ -330,7 +334,9 @@ TEST_P(Reproducibility_MobileNet_SSD, Accuracy)
     }
 
     // There is something wrong with Reshape layer in Myriad plugin.
-    if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
+    if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019
+        || backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH
+    )
     {
         if (targetId == DNN_TARGET_MYRIAD || targetId == DNN_TARGET_OPENCL_FP16)
             return;
@@ -511,6 +517,11 @@ TEST_P(Test_Caffe_nets, Colorization)
         l1 = 0.21;
         lInf = 4.5;
     }
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && target == DNN_TARGET_OPENCL_FP16)
+    {
+        l1 = 0.26; lInf = 6.5;
+    }
+
     normAssert(out, ref, "", l1, lInf);
     expectNoFallbacksFromIE(net);
 }
@@ -536,8 +547,8 @@ TEST_P(Test_Caffe_nets, DenseNet_121)
     float l1 = default_l1, lInf = default_lInf;
     if (target == DNN_TARGET_OPENCL_FP16)
     {
-#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_EQ(2019020000)
-        l1 = 0.04; lInf = 0.21;
+#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_GE(2019020000)
+        l1 = 0.045; lInf = 0.21;
 #else
         l1 = 0.017; lInf = 0.0795;
 #endif
@@ -666,7 +677,11 @@ INSTANTIATE_TEST_CASE_P(Test_Caffe, opencv_face_detector,
 TEST_P(Test_Caffe_nets, FasterRCNN_vgg16)
 {
     applyTestTag(
+#if defined(OPENCV_32BIT_CONFIGURATION) && defined(HAVE_OPENCL)
+        CV_TEST_TAG_MEMORY_2GB,  // utilizes ~1Gb, but huge blobs may not be allocated on 32-bit systems due memory fragmentation
+#else
         (target == DNN_TARGET_CPU ? CV_TEST_TAG_MEMORY_1GB : CV_TEST_TAG_MEMORY_2GB),
+#endif
         CV_TEST_TAG_LONG,
         CV_TEST_TAG_DEBUG_VERYLONG
     );
@@ -675,7 +690,10 @@ TEST_P(Test_Caffe_nets, FasterRCNN_vgg16)
     if ((backend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 || backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH) && (target == DNN_TARGET_OPENCL || target == DNN_TARGET_OPENCL_FP16))
         applyTestTag(target == DNN_TARGET_OPENCL ? CV_TEST_TAG_DNN_SKIP_IE_OPENCL : CV_TEST_TAG_DNN_SKIP_IE_OPENCL_FP16);
 
-    if ((backend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 || backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH) && target == DNN_TARGET_MYRIAD)
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH, CV_TEST_TAG_DNN_SKIP_IE_VERSION);
+
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 && target == DNN_TARGET_MYRIAD)
         applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_MYRIAD);
 #endif
 
@@ -688,7 +706,11 @@ TEST_P(Test_Caffe_nets, FasterRCNN_vgg16)
 TEST_P(Test_Caffe_nets, FasterRCNN_zf)
 {
     applyTestTag(
+#if defined(OPENCV_32BIT_CONFIGURATION) && defined(HAVE_OPENCL)
+        CV_TEST_TAG_MEMORY_2GB,
+#else
         (target == DNN_TARGET_CPU ? CV_TEST_TAG_MEMORY_512MB : CV_TEST_TAG_MEMORY_1GB),
+#endif
         CV_TEST_TAG_DEBUG_LONG
     );
     if ((backend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 ||

@@ -49,8 +49,13 @@
 
 #ifdef HAVE_DNN_NGRAPH
 #include "../ie_ngraph.hpp"
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+#include <ngraph/op/roi_pooling.hpp>
+#include <ngraph/op/psroi_pooling.hpp>
+#else
 #include <ngraph/op/experimental/layers/roi_pooling.hpp>
 #include <ngraph/op/experimental/layers/psroi_pooling.hpp>
+#endif
 #endif
 
 #include "../op_vkcom.hpp"
@@ -89,6 +94,7 @@ public:
     {
         computeMaxIdx = true;
         globalPooling = false;
+        isGlobalPooling = std::vector<bool>(3, false);
         stride = Size(1, 1);
         pad_t = pad_l = pad_b = pad_r = 0;
 
@@ -102,10 +108,13 @@ public:
                 type = AVE;
             else if (pool == "stochastic")
                 type = STOCHASTIC;
+            else if (pool == "sum")
+                type = SUM;
             else
                 CV_Error(Error::StsBadArg, "Unknown pooling type \"" + pool + "\"");
 
-            getPoolingKernelParams(params, kernel_size, globalPooling, pads_begin, pads_end, strides, padMode);
+            getPoolingKernelParams(params, kernel_size, isGlobalPooling, pads_begin, pads_end, strides, padMode);
+            globalPooling = isGlobalPooling[0] || isGlobalPooling[1] || isGlobalPooling[2];
             if (kernel_size.size() == 2) {
                 kernel = Size(kernel_size[1], kernel_size[0]);
                 stride = Size(strides[1], strides[0]);
@@ -157,9 +166,14 @@ public:
             out.push_back(outputs[0].size[i]);
         }
         if (globalPooling) {
-            kernel = Size(inp[1], inp[0]);
-            kernel_size = std::vector<size_t>(inp.begin(), inp.end());
-        }
+            std::vector<size_t> finalKernel;
+            for (int i = 0; i < inp.size(); i++) {
+                int idx = isGlobalPooling.size() - inp.size() + i;
+                finalKernel.push_back(isGlobalPooling[idx] ? inp[i] : kernel_size[idx]);
+             }
+             kernel_size = finalKernel;
+             kernel = Size(kernel_size[1], kernel_size[0]);
+         }
 
         getConvPoolPaddings(inp, kernel_size, strides, padMode, pads_begin, pads_end);
         if (pads_begin.size() == 2) {
@@ -181,15 +195,15 @@ public:
         {
             return type == MAX || type == AVE || type == ROI;
         }
-        else if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
+        if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
         {
             if (computeMaxIdx)
                 return false;
-#ifdef HAVE_INF_ENGINE
             if (kernel_size.size() == 3)
                 return preferableTarget == DNN_TARGET_CPU;
             if (preferableTarget == DNN_TARGET_MYRIAD) {
-#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_LE(INF_ENGINE_RELEASE_2019R1)
+#if INF_ENGINE_VER_MAJOR_LE(INF_ENGINE_RELEASE_2019R1)
                 if (type == MAX && (pad_l == 1 && pad_t == 1) && stride == Size(2, 2) ) {
                     return !isMyriadX();
                 }
@@ -197,15 +211,14 @@ public:
                 return type == MAX || type == AVE;
             }
             else
-                return type != STOCHASTIC;
-#else
-            return false;
-#endif
+                return type != STOCHASTIC && type != SUM;
         }
-        else if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH) {
+#endif
+        if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        {
             return !computeMaxIdx && type != STOCHASTIC;
         }
-        else
+        if (backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_HALIDE || backendId == DNN_BACKEND_VKCOM)
         {
             if (kernel_size.size() == 3)
                 return (backendId == DNN_BACKEND_OPENCV && preferableTarget == DNN_TARGET_CPU);
@@ -218,6 +231,7 @@ public:
             else
                 return false;
         }
+        return false;
     }
 
 #ifdef HAVE_OPENCL
@@ -292,7 +306,7 @@ public:
                 maxPooling(inputs[0], outputs[0], mask);
                 break;
             }
-            case AVE:
+            case AVE: case SUM:
                 CV_Assert_N(inputs.size() == 1, outputs.size() == 1);
                 avePooling(inputs[0], outputs[0]);
                 break;
@@ -402,9 +416,10 @@ public:
     }
 #endif
 
+
+#ifdef HAVE_VULKAN
     virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
     {
-#ifdef HAVE_VULKAN
         int padding_mode;
         vkcom::PoolType pool_type;
         int filter_size[2] = {kernel.height, kernel.width};
@@ -433,9 +448,9 @@ public:
                                                             stride_size, padding_mode,
                                                             pool_type, avePoolPaddedArea));
         return Ptr<BackendNode>(new VkComBackendNode(inputs, op));
-#endif
-        return Ptr<BackendNode>();
     }
+#endif
+
 
     virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
     {
@@ -447,7 +462,7 @@ public:
             return Ptr<BackendNode>();
     }
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&) CV_OVERRIDE
     {
         if (type == MAX || type == AVE)
@@ -465,7 +480,7 @@ public:
             ieLayer.setRoundingType(ceilMode ?
                                     InferenceEngine::Builder::PoolingLayer::RoundingType::CEIL :
                                     InferenceEngine::Builder::PoolingLayer::RoundingType::FLOOR);
-            ieLayer.setExcludePad(type == AVE && padMode == "SAME");
+            ieLayer.setExcludePad(!avePoolPaddedArea);
 
             InferenceEngine::Builder::Layer l = ieLayer;
             if (!padMode.empty())
@@ -493,50 +508,62 @@ public:
             CV_Error(Error::StsNotImplemented, "Unsupported pooling type");
         return Ptr<BackendNode>();
     }
-#endif  // HAVE_INF_ENGINE
-
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 
 #ifdef HAVE_DNN_NGRAPH
-virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inputs,
-                                    const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
-{
-    CV_Assert_N((inputs.size() == 1 && (type == MAX || type == AVE)) || inputs.size() == 2, nodes.size() == inputs.size());
-    auto& ieInpNode = nodes[0].dynamicCast<InfEngineNgraphNode>()->node;
+    virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inputs,
+                                        const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
+    {
+        CV_Assert_N((inputs.size() == 1 && (type == MAX || type == AVE || type == SUM)) || inputs.size() == 2, nodes.size() == inputs.size());
+        auto& ieInpNode = nodes[0].dynamicCast<InfEngineNgraphNode>()->node;
 
-    ngraph::op::PadType pad_type = ngraph::op::PadType::EXPLICIT;
-    if (!padMode.empty())
-        pad_type = padMode == "VALID" ? ngraph::op::PadType::VALID : ngraph::op::PadType::SAME_UPPER;
+        ngraph::op::PadType pad_type = ngraph::op::PadType::EXPLICIT;
+        if (!padMode.empty())
+            pad_type = padMode == "VALID" ? ngraph::op::PadType::VALID : ngraph::op::PadType::SAME_UPPER;
 
-    auto rounding_type = ceilMode ? ngraph::op::RoundingType::CEIL : ngraph::op::RoundingType::FLOOR;
-    if (type == AVE) {
-        auto exclude_pad = !avePoolPaddedArea;
-        auto ave_pool = std::make_shared<ngraph::op::v1::AvgPool>(ieInpNode, ngraph::Strides(strides),
-                        ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
-                        exclude_pad, rounding_type, pad_type);
-        return Ptr<BackendNode>(new InfEngineNgraphNode(ave_pool));
+        auto rounding_type = ceilMode ? ngraph::op::RoundingType::CEIL : ngraph::op::RoundingType::FLOOR;
+        if (type == AVE) {
+            auto exclude_pad = !avePoolPaddedArea;
+            auto ave_pool = std::make_shared<ngraph::op::v1::AvgPool>(ieInpNode, ngraph::Strides(strides),
+                            ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
+                            exclude_pad, rounding_type, pad_type);
+            return Ptr<BackendNode>(new InfEngineNgraphNode(ave_pool));
+        }
+        else if (type == SUM) {
+            ngraph::Shape inpShape = ieInpNode->get_shape();
+            CV_Assert(inpShape.size() == 2 + kernel_size.size());
+            std::vector<int64_t> axes;
+            for (size_t i = 0; i < kernel_size.size(); i++)
+            {
+                if (inpShape[2 + i] == kernel_size[i])
+                    axes.push_back(2 + i);
+            }
+            auto reduction_axes = std::make_shared<ngraph::op::Constant>(ngraph::element::i64, ngraph::Shape{axes.size()}, axes);
+            auto reduce_sum = std::make_shared<ngraph::op::v1::ReduceSum>(ieInpNode, reduction_axes, true);
+            return Ptr<BackendNode>(new InfEngineNgraphNode(reduce_sum));
+        }
+        else if (type == MAX) {
+            auto max_pool = std::make_shared<ngraph::op::v1::MaxPool>(ieInpNode, ngraph::Strides(strides),
+                            ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
+                            rounding_type, pad_type);
+            return Ptr<BackendNode>(new InfEngineNgraphNode(max_pool));
+        }
+        else if (type == ROI) {
+            auto& coords = nodes[1].dynamicCast<InfEngineNgraphNode>()->node;
+            auto roi = std::make_shared<ngraph::op::ROIPooling>(ieInpNode, coords,
+                       ngraph::Shape{(size_t)pooledSize.height, (size_t)pooledSize.width}, spatialScale, "max");
+            return Ptr<BackendNode>(new InfEngineNgraphNode(roi));
+        }
+        else if (type == PSROI) {
+            auto& coords = nodes[1].dynamicCast<InfEngineNgraphNode>()->node;
+            auto psroi = std::make_shared<ngraph::op::PSROIPooling>(ieInpNode, coords,
+                         (size_t)psRoiOutChannels, (size_t)pooledSize.width, spatialScale, 1, 1, "average");
+            return Ptr<BackendNode>(new InfEngineNgraphNode(psroi));
+        }
+        else
+            CV_Error(Error::StsNotImplemented, "Unsupported pooling type");
     }
-    else if (type == MAX) {
-        auto max_pool = std::make_shared<ngraph::op::v1::MaxPool>(ieInpNode, ngraph::Strides(strides),
-                        ngraph::Shape(pads_begin), ngraph::Shape(pads_end), ngraph::Shape(kernel_size),
-                        rounding_type, pad_type);
-        return Ptr<BackendNode>(new InfEngineNgraphNode(max_pool));
-    }
-    else if (type == ROI) {
-        auto& coords = nodes[1].dynamicCast<InfEngineNgraphNode>()->node;
-        auto roi = std::make_shared<ngraph::op::ROIPooling>(ieInpNode, coords,
-                   ngraph::Shape{(size_t)pooledSize.height, (size_t)pooledSize.width}, spatialScale, "max");
-        return Ptr<BackendNode>(new InfEngineNgraphNode(roi));
-    }
-    else if (type == PSROI) {
-        auto& coords = nodes[1].dynamicCast<InfEngineNgraphNode>()->node;
-        auto psroi = std::make_shared<ngraph::op::PSROIPooling>(ieInpNode, coords,
-                     (size_t)psRoiOutChannels, (size_t)pooledSize.width, spatialScale, 1, 1, "average");
-        return Ptr<BackendNode>(new InfEngineNgraphNode(psroi));
-    }
-    else
-        CV_Error(Error::StsNotImplemented, "Unsupported pooling type");
-}
 #endif  // HAVE_DNN_NGRAPH
 
 
@@ -875,7 +902,7 @@ virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inp
                             }
                         }
                     }
-                else if (poolingType == AVE)
+                else if (poolingType == AVE || poolingType == SUM)
                 {
                     for( ; x0 < x1; ++x0)
                     {
@@ -886,7 +913,7 @@ virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inp
                         xend = min(xend, inp_width);
                         float inv_kernel_area = avePoolPaddedArea ? xdelta * ydelta * ddelta :
                                                 ((dend - dstart) * (yend - ystart) * (xend - xstart));
-                        inv_kernel_area = 1.0 / inv_kernel_area;
+                        inv_kernel_area = poolingType == AVE ? 1.0 / inv_kernel_area : 1.0;
 #if CV_SIMD128
                         if( isPool2D && xstart > 0 && x0 + 7 < x1 && (x0 + 7) * stride_w - pad_l + kernel_w < inp_width )
                         {
@@ -1149,20 +1176,25 @@ virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inp
         std::vector<int> inpShape(inputs[0].begin() + 2, inputs[0].end());
         std::vector<int> outShape(inputs[0].begin(), inputs[0].begin() + 2);
 
-        if (globalPooling)
-        {
-            outShape.push_back(1);
-            outShape.push_back(1);
+        std::vector<size_t> local_kernel;
+        if (globalPooling) {
+            for (int i = 0; i < inpShape.size(); i++) {
+                int idx = isGlobalPooling.size() - inpShape.size() + i;
+                local_kernel.push_back(isGlobalPooling[idx] ? inpShape[i] : kernel_size[idx]);
+            }
+        } else {
+            local_kernel = kernel_size;
         }
-        else if (type == ROI || type == PSROI)
+
+        if (type == ROI || type == PSROI)
         {
             outShape.push_back(pooledSize.height);
             outShape.push_back(pooledSize.width);
         }
         else if (padMode.empty())
         {
-            for (int i = 0; i < kernel_size.size(); i++) {
-                float dst = (float)(inpShape[i] + pads_begin[i] + pads_end[i] - kernel_size[i]) / strides[i];
+            for (int i = 0; i < local_kernel.size(); i++) {
+                float dst = (float)(inpShape[i] + pads_begin[i] + pads_end[i] - local_kernel[i]) / strides[i];
                 outShape.push_back(1 + (ceilMode ? ceil(dst) : floor(dst)));
             }
 
@@ -1177,7 +1209,7 @@ virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inp
         }
         else
         {
-            getConvPoolOutParams(inpShape, kernel_size, strides, padMode, std::vector<size_t>(kernel_size.size(), 1), outShape);
+            getConvPoolOutParams(inpShape, local_kernel, strides, padMode, std::vector<size_t>(local_kernel.size(), 1), outShape);
         }
         if (type == ROI)
         {
@@ -1226,6 +1258,7 @@ private:
         MAX,
         AVE,
         STOCHASTIC,
+        SUM,
         ROI,   // RoI pooling, https://arxiv.org/pdf/1504.08083.pdf
         PSROI  // Position-sensitive RoI pooling, https://arxiv.org/pdf/1605.06409.pdf
     };

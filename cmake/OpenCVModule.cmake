@@ -788,6 +788,7 @@ macro(ocv_glob_module_sources)
   if (APPLE)
     file(GLOB_RECURSE lib_srcs_apple
          "${CMAKE_CURRENT_LIST_DIR}/src/*.mm"
+         "${CMAKE_CURRENT_LIST_DIR}/src/*.swift"
     )
     list(APPEND lib_srcs ${lib_srcs_apple})
   endif()
@@ -1087,6 +1088,17 @@ macro(ocv_check_dependencies)
   endforeach()
 endmacro()
 
+################################################################################
+# OpenCV tests
+################################################################################
+
+if(DEFINED OPENCV_BUILD_TEST_MODULES_LIST)
+  string(REPLACE "," ";" OPENCV_BUILD_TEST_MODULES_LIST "${OPENCV_BUILD_TEST_MODULES_LIST}")  # support comma-separated list (,) too
+endif()
+if(DEFINED OPENCV_BUILD_PERF_TEST_MODULES_LIST)
+  string(REPLACE "," ";" OPENCV_BUILD_PERF_TEST_MODULES_LIST "${OPENCV_BUILD_PERF_TEST_MODULES_LIST}")  # support comma-separated list (,) too
+endif()
+
 # auxiliary macro to parse arguments of ocv_add_accuracy_tests and ocv_add_perf_tests commands
 macro(__ocv_parse_test_sources tests_type)
   set(OPENCV_${tests_type}_${the_module}_SOURCES "")
@@ -1115,6 +1127,8 @@ macro(__ocv_parse_test_sources tests_type)
   unset(__currentvar)
 endmacro()
 
+ocv_check_environment_variables(OPENCV_TEST_EXTRA_CXX_FLAGS_Release)
+
 # this is a command for adding OpenCV performance tests to the module
 # ocv_add_perf_tests(<extra_dependencies>)
 function(ocv_add_perf_tests)
@@ -1125,7 +1139,12 @@ function(ocv_add_perf_tests)
   endif()
 
   set(perf_path "${CMAKE_CURRENT_LIST_DIR}/perf")
-  if(BUILD_PERF_TESTS AND EXISTS "${perf_path}")
+  if(BUILD_PERF_TESTS AND EXISTS "${perf_path}"
+      AND (NOT DEFINED OPENCV_BUILD_PERF_TEST_MODULES_LIST
+          OR OPENCV_BUILD_PERF_TEST_MODULES_LIST STREQUAL "all"
+          OR ";${OPENCV_BUILD_PERF_TEST_MODULES_LIST};" MATCHES ";${name};"
+      )
+  )
     __ocv_parse_test_sources(PERF ${ARGN})
 
     # opencv_imgcodecs is required for imread/imwrite
@@ -1210,7 +1229,12 @@ function(ocv_add_accuracy_tests)
   ocv_debug_message("ocv_add_accuracy_tests(" ${ARGN} ")")
 
   set(test_path "${CMAKE_CURRENT_LIST_DIR}/test")
-  if(BUILD_TESTS AND EXISTS "${test_path}")
+  if(BUILD_TESTS AND EXISTS "${test_path}"
+      AND (NOT DEFINED OPENCV_BUILD_TEST_MODULES_LIST
+          OR OPENCV_BUILD_TEST_MODULES_LIST STREQUAL "all"
+          OR ";${OPENCV_BUILD_TEST_MODULES_LIST};" MATCHES ";${name};"
+      )
+  )
     __ocv_parse_test_sources(TEST ${ARGN})
 
     # opencv_imgcodecs is required for imread/imwrite
@@ -1277,6 +1301,10 @@ function(ocv_add_accuracy_tests)
 
       if(NOT BUILD_opencv_world)
         _ocv_add_precompiled_headers(${the_target})
+      endif()
+
+      if(OPENCV_TEST_EXTRA_CXX_FLAGS_Release)
+        target_compile_options(${the_target} PRIVATE "$<$<CONFIG:Release>:${OPENCV_TEST_EXTRA_CXX_FLAGS_Release}>")
       endif()
 
       ocv_add_test_from_target("${the_target}" "Accuracy" "${the_target}")

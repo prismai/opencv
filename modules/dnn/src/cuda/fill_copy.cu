@@ -63,8 +63,11 @@ namespace cv { namespace dnn { namespace cuda4dnn { namespace kernels {
         }
     }
 
+#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 530)
     template void fill(const Stream&, Span<__half>, __half);
+#endif
     template void fill(const Stream&, Span<float>, float);
+    template void fill(const Stream&, Span<int>, int);
 
     template <class T, std::size_t N> static
     void launch_vectorized_copy(const Stream& stream, Span<T> output, View<T> input) {
@@ -87,7 +90,9 @@ namespace cv { namespace dnn { namespace cuda4dnn { namespace kernels {
         }
     }
 
+#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 530)
     template void copy(const Stream&, Span<__half>, View<__half>);
+#endif
     template void copy(const Stream&, Span<float>, View<float>);
 
 }}}} /* namespace cv::dnn::cuda4dnn::kernels */

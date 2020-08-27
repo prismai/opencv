@@ -10,7 +10,11 @@
 
 #ifdef HAVE_DNN_NGRAPH
 #include "../ie_ngraph.hpp"
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+#include <ngraph/op/proposal.hpp>
+#else
 #include <ngraph/op/experimental/layers/proposal.hpp>
+#endif
 #endif
 
 namespace cv { namespace dnn {
@@ -327,7 +331,7 @@ public:
         layerOutputs[0].col(2).copyTo(dst);
     }
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&) CV_OVERRIDE
     {
         InferenceEngine::Builder::ProposalLayer ieLayer(name);
@@ -351,7 +355,7 @@ public:
 
         return Ptr<BackendNode>(new InfEngineBackendNode(ieLayer));
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 
 #ifdef HAVE_DNN_NGRAPH

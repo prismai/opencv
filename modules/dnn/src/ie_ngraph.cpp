@@ -6,13 +6,15 @@
 // Third party copyrights are property of their respective owners.
 
 #include "precomp.hpp"
+
+#include <fstream>
+
 #include "ie_ngraph.hpp"
 
 #include <opencv2/dnn/shape_utils.hpp>
 
 #ifdef HAVE_DNN_NGRAPH
 #include <ie_extension.h>
-#include <ie_plugin_dispatcher.hpp>
 #endif  // HAVE_DNN_NGRAPH
 
 #include <opencv2/core/utils/configuration.private.hpp>
@@ -22,10 +24,41 @@ namespace cv { namespace dnn {
 
 #ifdef HAVE_DNN_NGRAPH
 
+static bool DNN_IE_SERIALIZE = utils::getConfigurationParameterBool("OPENCV_DNN_IE_SERIALIZE", false);
+
 // For networks with input layer which has an empty name, IE generates a name id[some_number].
 // OpenCV lets users use an empty input name and to prevent unexpected naming,
 // we can use some predefined name.
-static std::string kDefaultInpLayerName = "empty_inp_layer_name";
+static std::string kDefaultInpLayerName = "opencv_ngraph_empty_inp_layer_name";
+static constexpr const char* kOpenCVLayersType = "opencv_ngraph_layer";
+
+static std::string shapesToStr(const std::vector<Mat>& mats)
+{
+    std::ostringstream shapes;
+    shapes << mats.size() << " ";
+    for (const Mat& m : mats)
+    {
+        shapes << m.dims << " ";
+        for (int i = 0; i < m.dims; ++i)
+            shapes << m.size[i] << " ";
+    }
+    return shapes.str();
+}
+
+static void strToShapes(const std::string& str, std::vector<std::vector<size_t> >& shapes)
+{
+    std::istringstream ss(str);
+    int num, dims;
+    ss >> num;
+    shapes.resize(num);
+    for (int i = 0; i < num; ++i)
+    {
+        ss >> dims;
+        shapes[i].resize(dims);
+        for (int j = 0; j < dims; ++j)
+            ss >> shapes[i][j];
+    }
+}
 
 static std::vector<Ptr<NgraphBackendWrapper> >
 ngraphWrappers(const std::vector<Ptr<BackendWrapper> >& ptrs)
@@ -40,23 +73,304 @@ ngraphWrappers(const std::vector<Ptr<BackendWrapper> >& ptrs)
     return wrappers;
 }
 
+class NgraphCustomOp: public ngraph::op::Op {
+public:
+    const ngraph::NodeTypeInfo& get_type_info() const override
+    {
+        static constexpr ngraph::NodeTypeInfo type_info{kOpenCVLayersType, 0};
+        return type_info;
+    }
+
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_3)
+    NgraphCustomOp(const ngraph::OutputVector& inputs,
+#else
+    NgraphCustomOp(const ngraph::NodeVector& inputs,
+#endif
+                   const std::map<std::string, InferenceEngine::Parameter>& params = {}):
+        Op(inputs), params(params)
+    {
+        constructor_validate_and_infer_types();
+    }
+
+    ~NgraphCustomOp()
+    {
+        // nothing
+    }
+
+    void validate_and_infer_types() override
+    {
+        std::vector<std::vector<size_t> > shapes;
+        strToShapes(params["outputs"], shapes);
+        set_output_size(shapes.size());
+        for (size_t i = 0; i < shapes.size(); ++i)
+        {
+            ngraph::Shape output_shape(shapes[i]);
+            set_output_type(i, get_input_element_type(0), output_shape);
+        }
+    }
+
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_4)
+    std::shared_ptr<ngraph::Node> clone_with_new_inputs(const ngraph::OutputVector& new_args) const override
+    {
+        return std::make_shared<NgraphCustomOp>(new_args, params);
+    }
+#else
+    std::shared_ptr<ngraph::Node> copy_with_new_args(const ngraph::NodeVector& new_args) const override
+    {
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_3)
+        return std::make_shared<NgraphCustomOp>(ngraph::as_output_vector(new_args), params);
+#else
+        return std::make_shared<NgraphCustomOp>(new_args, params);
+#endif
+    }
+#endif
+
+    bool visit_attributes(ngraph::AttributeVisitor& visitor) override
+    {
+        for (auto& attr : params)
+        {
+            if (attr.second.is<std::string>())
+                visitor.on_attribute(attr.first, attr.second.as<std::string>());
+        }
+        return true;
+    }
+
+    std::map<std::string, InferenceEngine::Parameter> params;
+};
+
+
+class InfEngineNgraphCustomLayer : public InferenceEngine::ILayerExecImpl
+{
+public:
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_2)
+    explicit InfEngineNgraphCustomLayer(const std::shared_ptr<ngraph::Node>& _node)
+    {
+        node = std::dynamic_pointer_cast<NgraphCustomOp>(_node);
+        CV_Assert(node);
+        std::string implStr = node->params["impl"];
+        std::istringstream iss(implStr);
+#else
+    explicit InfEngineNgraphCustomLayer(const InferenceEngine::CNNLayer& layer) : cnnLayer(layer)
+    {
+        std::istringstream iss(layer.GetParamAsString("impl"));
+#endif
+        size_t ptr;
+        iss >> ptr;
+        cvLayer = (Layer*)ptr;
+
+        std::vector<std::vector<size_t> > shapes;
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_2)
+        strToShapes(node->params["internals"], shapes);
+#else
+        strToShapes(layer.GetParamAsString("internals"), shapes);
+#endif
+        internals.resize(shapes.size());
+        for (int i = 0; i < shapes.size(); ++i)
+            internals[i].create(std::vector<int>(shapes[i].begin(), shapes[i].end()), CV_32F);
+    }
+
+    ~InfEngineNgraphCustomLayer()
+    {
+        // nothing
+    }
+
+    virtual InferenceEngine::StatusCode execute(std::vector<InferenceEngine::Blob::Ptr>& inputs,
+                                                std::vector<InferenceEngine::Blob::Ptr>& outputs,
+                                                InferenceEngine::ResponseDesc *resp) noexcept
+    {
+        std::vector<Mat> inpMats, outMats;
+        infEngineBlobsToMats(inputs, inpMats);
+        infEngineBlobsToMats(outputs, outMats);
+
+        try
+        {
+            cvLayer->forward(inpMats, outMats, internals);
+            return InferenceEngine::StatusCode::OK;
+        }
+        catch (...)
+        {
+            return InferenceEngine::StatusCode::GENERAL_ERROR;
+        }
+    }
+
+    virtual InferenceEngine::StatusCode
+    getSupportedConfigurations(std::vector<InferenceEngine::LayerConfig>& conf,
+                               InferenceEngine::ResponseDesc* resp) noexcept
+    {
+        std::vector<InferenceEngine::DataConfig> inDataConfig;
+        std::vector<InferenceEngine::DataConfig> outDataConfig;
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_2)
+        InferenceEngine::SizeVector order;
+        size_t offset = std::numeric_limits<size_t>::max();
+        for (int i = 0; i < node->get_input_size(); ++i)
+        {
+            InferenceEngine::DataConfig conf;
+            auto shape = node->input_value(i).get_shape();
+            order.resize(shape.size());
+            std::iota(order.begin(), order.end(), 0);
+            conf.desc = InferenceEngine::TensorDesc(InferenceEngine::Precision::FP32, shape, {shape, order, offset});
+            inDataConfig.push_back(conf);
+        }
+
+        for (int i = 0; i < node->get_output_size(); ++i)
+        {
+            InferenceEngine::DataConfig conf;
+            auto shape = node->output(i).get_shape();
+            order.resize(shape.size());
+            std::iota(order.begin(), order.end(), 0);
+            conf.desc = InferenceEngine::TensorDesc(InferenceEngine::Precision::FP32, shape, {shape, order, offset});
+            outDataConfig.push_back(conf);
+        }
+#else
+        for (auto& it : cnnLayer.insData)
+        {
+            InferenceEngine::DataConfig conf;
+            conf.desc = it.lock()->getTensorDesc();
+            inDataConfig.push_back(conf);
+        }
+
+        for (auto& it : cnnLayer.outData)
+        {
+            InferenceEngine::DataConfig conf;
+            conf.desc = it->getTensorDesc();
+            outDataConfig.push_back(conf);
+        }
+#endif
+
+        InferenceEngine::LayerConfig layerConfig;
+        layerConfig.inConfs = inDataConfig;
+        layerConfig.outConfs = outDataConfig;
+
+        conf.push_back(layerConfig);
+        return InferenceEngine::StatusCode::OK;
+    }
+
+    InferenceEngine::StatusCode init(InferenceEngine::LayerConfig& config,
+                                     InferenceEngine::ResponseDesc *resp) noexcept
+    {
+        return InferenceEngine::StatusCode::OK;
+    }
+
+private:
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_2)
+    std::shared_ptr<NgraphCustomOp> node;
+#else
+    InferenceEngine::CNNLayer cnnLayer;
+#endif
+    dnn::Layer* cvLayer;
+    std::vector<Mat> internals;
+};
+
+#if INF_ENGINE_VER_MAJOR_LT(INF_ENGINE_RELEASE_2020_2)
+class InfEngineNgraphCustomLayerFactory : public InferenceEngine::ILayerImplFactory {
+public:
+    explicit InfEngineNgraphCustomLayerFactory(const InferenceEngine::CNNLayer* layer) : cnnLayer(*layer)
+    {
+        // nothing
+    }
+
+    InferenceEngine::StatusCode
+    getImplementations(std::vector<InferenceEngine::ILayerImpl::Ptr>& impls,
+                       InferenceEngine::ResponseDesc* resp) noexcept override
+    {
+        impls.push_back(std::make_shared<InfEngineNgraphCustomLayer>(cnnLayer));
+        return InferenceEngine::StatusCode::OK;
+    }
+
+private:
+    InferenceEngine::CNNLayer cnnLayer;
+};
+#endif
+
+
+class InfEngineNgraphExtension : public InferenceEngine::IExtension
+{
+public:
+    void Unload() noexcept override {}
+    void Release() noexcept override { delete this; }
+    void GetVersion(const InferenceEngine::Version*&) const noexcept override {}
+
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_2)
+    std::vector<std::string> getImplTypes(const std::shared_ptr<ngraph::Node>& node) override {
+        return {"CPU"};
+    }
+
+    InferenceEngine::ILayerImpl::Ptr getImplementation(const std::shared_ptr<ngraph::Node>& node, const std::string& implType) override {
+        if (std::dynamic_pointer_cast<NgraphCustomOp>(node) && implType == "CPU") {
+            return std::make_shared<InfEngineNgraphCustomLayer>(node);
+        }
+        return nullptr;
+    }
+#else
+    virtual void SetLogCallback(InferenceEngine::IErrorListener&) noexcept {}
+
+    virtual InferenceEngine::StatusCode getPrimitiveTypes(char**&, unsigned int&,
+                                                          InferenceEngine::ResponseDesc*) noexcept
+    {
+        return InferenceEngine::StatusCode::OK;
+    }
+
+    InferenceEngine::StatusCode getFactoryFor(InferenceEngine::ILayerImplFactory*& factory,
+                                              const InferenceEngine::CNNLayer* cnnLayer,
+                                              InferenceEngine::ResponseDesc* resp) noexcept
+    {
+        if (cnnLayer->type != kOpenCVLayersType)
+            return InferenceEngine::StatusCode::NOT_IMPLEMENTED;
+        factory = new InfEngineNgraphCustomLayerFactory(cnnLayer);
+        return InferenceEngine::StatusCode::OK;
+    }
+#endif
+};
+
+
+
 InfEngineNgraphNode::InfEngineNgraphNode(std::shared_ptr<ngraph::Node>&& _node)
     : BackendNode(DNN_BACKEND_INFERENCE_ENGINE_NGRAPH), node(std::move(_node)) {}
 
 InfEngineNgraphNode::InfEngineNgraphNode(std::shared_ptr<ngraph::Node>& _node)
     : BackendNode(DNN_BACKEND_INFERENCE_ENGINE_NGRAPH), node(_node) {}
 
+InfEngineNgraphNode::InfEngineNgraphNode(const std::vector<Ptr<BackendNode> >& nodes,
+                                         Ptr<Layer>& cvLayer_, std::vector<Mat*>& inputs,
+                                         std::vector<Mat>& outputs, std::vector<Mat>& internals)
+    : BackendNode(DNN_BACKEND_INFERENCE_ENGINE_NGRAPH), cvLayer(cvLayer_)
+{
+    std::ostringstream oss;
+    oss << (size_t)cvLayer.get();
+
+    std::map<std::string, InferenceEngine::Parameter> params = {
+        {"impl", oss.str()},
+        {"outputs", shapesToStr(outputs)},
+        {"internals", shapesToStr(internals)}
+    };
+
+#if INF_ENGINE_VER_MAJOR_GE(INF_ENGINE_RELEASE_2020_3)
+    ngraph::OutputVector inp_nodes;
+#else
+    ngraph::NodeVector inp_nodes;
+#endif
+    for (const auto& node : nodes)
+        inp_nodes.emplace_back(node.dynamicCast<InfEngineNgraphNode>()->node);
+    node = std::make_shared<NgraphCustomOp>(inp_nodes, params);
+
+    CV_Assert(!cvLayer->name.empty());
+    setName(cvLayer->name);
+}
+
 void InfEngineNgraphNode::setName(const std::string& name) {
     node->set_friendly_name(name);
 }
 
-InfEngineNgraphNet::InfEngineNgraphNet()
+InfEngineNgraphNet::InfEngineNgraphNet(detail::NetImplBase& netImpl)
+    : netImpl_(netImpl)
 {
     hasNetOwner = false;
     device_name = "CPU";
 }
 
-InfEngineNgraphNet::InfEngineNgraphNet(InferenceEngine::CNNNetwork& net) : cnn(net)
+InfEngineNgraphNet::InfEngineNgraphNet(detail::NetImplBase& netImpl, InferenceEngine::CNNNetwork& net)
+    : netImpl_(netImpl)
+    , cnn(net)
 {
     hasNetOwner = true;
     device_name = "CPU";
@@ -73,7 +387,11 @@ void InfEngineNgraphNet::setNodePtr(std::shared_ptr<ngraph::Node>* ptr) {
 
  void InfEngineNgraphNet::release() {
      for (auto& node : components.back()) {
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+         if (!(ngraph::op::is_parameter(node) || ngraph::op::is_output(node) || ngraph::op::is_constant(node)) ) {
+#else
          if (!(node->is_parameter() || node->is_output() || node->is_constant()) ) {
+#endif
              auto it = all_nodes.find(node->get_friendly_name());
              if (it != all_nodes.end()) {
                  unconnectedNodes.erase(*(it->second));
@@ -140,11 +458,19 @@ void InfEngineNgraphNet::createNet(Target targetId) {
                 ngraph::ResultVector outputs;
                 ngraph::ParameterVector inps;
                 for (auto& node : components.back()) {
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+                    if (ngraph::op::is_parameter(node)) {
+#else
                     if (node->is_parameter()) {
+#endif
                         auto parameter = std::dynamic_pointer_cast<ngraph::op::Parameter>(node);
                         inps.push_back(parameter);
                     }
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+                    else if (ngraph::op::is_output(node)) {
+#else
                     else if (node->is_output()) {
+#endif
                         auto result = std::dynamic_pointer_cast<ngraph::op::Result>(node);
                         outputs.push_back(result);
                     }
@@ -195,9 +521,27 @@ void InfEngineNgraphNet::init(Target targetId)
             ngraph_function->validate_nodes_and_infer_types();
         }
         cnn = InferenceEngine::CNNNetwork(ngraph_function);
-#ifdef _DEBUG  // TODO
-        //cnn.serialize("/tmp/cnn.xml", "/tmp/cnn.bin");
+
+        if (DNN_IE_SERIALIZE)
+        {
+#ifndef OPENCV_DNN_DISABLE_NETWORK_AUTO_DUMP
+            std::string dumpFileNameBase = netImpl_.getDumpFileNameBase();
+            try
+            {
+                cnn.serialize(dumpFileNameBase + "_ngraph.xml", dumpFileNameBase + "_ngraph.bin");
+            }
+            catch (const std::exception& e)
+            {
+                std::ofstream out((dumpFileNameBase + "_ngraph.error").c_str(), std::ios::out);
+                out << "Exception: " << e.what() << std::endl;
+            }
+            catch (...)
+            {
+                std::ofstream out((dumpFileNameBase + "_ngraph.error").c_str(), std::ios::out);
+                out << "Can't dump: unknown exception" << std::endl;
+            }
 #endif
+        }
     }
 
     switch (targetId)
@@ -231,11 +575,10 @@ void InfEngineNgraphNet::init(Target targetId)
                 }
             }
         }
-    } else {
-        for (const auto& name : requestedOutputs)
-        {
-            cnn.addOutput(name);
-        }
+    }
+    for (const auto& name : requestedOutputs)
+    {
+        cnn.addOutput(name);
     }
 
     for (const auto& it : cnn.getInputsInfo())
@@ -292,7 +635,7 @@ void InfEngineNgraphNet::initPlugin(InferenceEngine::CNNNetwork& net)
     try
     {
         AutoLock lock(getInitializationMutex());
-        InferenceEngine::Core& ie = getCore();
+        InferenceEngine::Core& ie = getCore(device_name);
         {
             isInit = true;
             std::vector<std::string> candidates;
@@ -323,7 +666,14 @@ void InfEngineNgraphNet::initPlugin(InferenceEngine::CNNNetwork& net)
             }
             // Some of networks can work without a library of extra layers.
             // OpenCV fallbacks as extensions.
-            ie.AddExtension(std::make_shared<InfEngineExtension>(), "CPU");
+            try
+            {
+                ie.AddExtension(std::make_shared<InfEngineNgraphExtension>(), "CPU");
+            }
+            catch(const std::exception& e)
+            {
+                CV_LOG_INFO(NULL, "DNN-IE: Can't register OpenCV custom layers nGraph extension: " << e.what());
+            }
 #ifndef _WIN32
             // Limit the number of CPU threads.
             if (device_name == "CPU")
@@ -334,9 +684,31 @@ void InfEngineNgraphNet::initPlugin(InferenceEngine::CNNNetwork& net)
         }
         std::map<std::string, std::string> config;
         if (device_name == "MYRIAD") {
+#if INF_ENGINE_VER_MAJOR_GT(INF_ENGINE_RELEASE_2020_4)
+            config.emplace("MYRIAD_DETECT_NETWORK_BATCH", CONFIG_VALUE(NO));
+#else
             config.emplace("VPU_DETECT_NETWORK_BATCH", CONFIG_VALUE(NO));
+#endif
         }
-        netExec = ie.LoadNetwork(net, device_name, config);
+
+        bool isHetero = device_name == "FPGA";
+        // It is actual only for non-CPU targets and networks built in runtime using nGraph.
+        // We do not check IR models because they can be with version less than IRv10
+        if (!isHetero && device_name != "CPU" && !hasNetOwner)
+        {
+            for (auto& node : net.getFunction()->get_ops())
+            {
+                if (node->description() == kOpenCVLayersType)
+                {
+                    isHetero = true;
+                    break;
+                }
+            }
+        }
+        if (isHetero)
+            netExec = ie.LoadNetwork(net, "HETERO:" + device_name + ",CPU", config);
+        else
+            netExec = ie.LoadNetwork(net, device_name, config);
     }
     catch (const std::exception& ex)
     {
@@ -509,6 +881,13 @@ void forwardNgraph(const std::vector<Ptr<BackendWrapper> >& outBlobsWrappers,
     Ptr<InfEngineNgraphNode> ieNode = node.dynamicCast<InfEngineNgraphNode>();
     CV_Assert(!ieNode.empty());
     ieNode->net->forward(outBlobsWrappers, isAsync);
+}
+
+void InfEngineNgraphNet::reset()
+{
+    allBlobs.clear();
+    infRequests.clear();
+    isInit = false;
 }
 
 void InfEngineNgraphNet::addBlobs(const std::vector<cv::Ptr<BackendWrapper> >& ptrs)

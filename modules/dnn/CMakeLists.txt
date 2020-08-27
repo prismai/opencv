@@ -10,18 +10,35 @@ set(the_description "Deep neural network module. It allows to load models from d
 
 ocv_add_dispatched_file_force_all("layers/layers_common" AVX AVX2 AVX512_SKX)
 
-ocv_add_module(dnn opencv_core opencv_imgproc WRAP python java js)
+ocv_add_module(dnn opencv_core opencv_imgproc WRAP python java objc js)
 
 ocv_option(OPENCV_DNN_OPENCL "Build with OpenCL support" HAVE_OPENCL AND NOT APPLE)
+if(HAVE_TENGINE)
+  add_definitions(-DHAVE_TENGINE=1)
+endif()
 
 if(OPENCV_DNN_OPENCL AND HAVE_OPENCL)
   add_definitions(-DCV_OCL4DNN=1)
 endif()
 
-ocv_option(OPENCV_DNN_CUDA "Build with CUDA support" HAVE_CUDA AND HAVE_CUBLAS AND HAVE_CUDNN)
+ocv_option(OPENCV_DNN_CUDA "Build with CUDA support"
+    HAVE_CUDA
+    AND HAVE_CUBLAS
+    AND HAVE_CUDNN
+)
 
-if(OPENCV_DNN_CUDA AND HAVE_CUDA AND HAVE_CUBLAS AND HAVE_CUDNN)
-  add_definitions(-DCV_CUDA4DNN=1)
+if(OPENCV_DNN_CUDA)
+  if(HAVE_CUDA AND HAVE_CUBLAS AND HAVE_CUDNN)
+    add_definitions(-DCV_CUDA4DNN=1)
+  else()
+    if(NOT HAVE_CUDA)
+      message(SEND_ERROR "DNN: CUDA backend requires CUDA Toolkit. Please resolve dependency or disable OPENCV_DNN_CUDA=OFF")
+    elseif(NOT HAVE_CUBLAS)
+      message(SEND_ERROR "DNN: CUDA backend requires cuBLAS. Please resolve dependency or disable OPENCV_DNN_CUDA=OFF")
+    elseif(NOT HAVE_CUDNN)
+      message(SEND_ERROR "DNN: CUDA backend requires cuDNN. Please resolve dependency or disable OPENCV_DNN_CUDA=OFF")
+    endif()
+  endif()
 endif()
 
 ocv_cmake_hook_append(INIT_MODULE_SOURCES_opencv_dnn "${CMAKE_CURRENT_LIST_DIR}/cmake/hooks/INIT_MODULE_SOURCES_opencv_dnn.cmake")
@@ -69,6 +86,9 @@ ocv_warnings_disable(CMAKE_CXX_FLAGS
     -Winvalid-offsetof                 # Apple Clang (attr_value.pb.cc)
 )
 
+set(include_dirs "")
+set(libs "")
+
 if(PROTOBUF_UPDATE_FILES)
   file(GLOB proto_files "${CMAKE_CURRENT_LIST_DIR}/src/tensorflow/*.proto" "${CMAKE_CURRENT_LIST_DIR}/src/caffe/opencv-caffe.proto" "${CMAKE_CURRENT_LIST_DIR}/src/onnx/opencv-onnx.proto")
   set(PROTOBUF_GENERATE_CPP_APPEND_PATH ON) # required for tensorflow
@@ -79,11 +99,15 @@ else()
   set(fw_inc "${CMAKE_CURRENT_LIST_DIR}/misc/caffe" "${CMAKE_CURRENT_LIST_DIR}/misc/tensorflow" "${CMAKE_CURRENT_LIST_DIR}/misc/onnx")
 endif()
 
-set(include_dirs ${fw_inc})
+list(APPEND include_dirs ${fw_inc})
+list(APPEND libs ${Protobuf_LIBRARIES})
+if(NOT BUILD_PROTOBUF)
+  list(APPEND include_dirs ${Protobuf_INCLUDE_DIRS})
+endif()
+
 set(sources_options "")
 
-set(libs libprotobuf ${LAPACK_LIBRARIES})
-
+list(APPEND libs ${LAPACK_LIBRARIES})
 if(OPENCV_DNN_OPENCL AND HAVE_OPENCL)
   list(APPEND include_dirs ${OPENCL_INCLUDE_DIRS})
 else()
@@ -95,8 +119,8 @@ if(OPENCV_DNN_CUDA AND HAVE_CUDA AND HAVE_CUBLAS AND HAVE_CUDNN)
   set(CC_LIST ${CUDA_ARCH_BIN})
   separate_arguments(CC_LIST)
   foreach(cc ${CC_LIST})
-    if(cc VERSION_LESS 5.3)
-      message(FATAL_ERROR "CUDA backend for DNN module requires CC 5.3 or higher. Please remove unsupported architectures from CUDA_ARCH_BIN option.")
+    if(cc VERSION_LESS 3.0)
+      message(FATAL_ERROR "CUDA backend for DNN module requires CC 3.0 or higher. Please remove unsupported architectures from CUDA_ARCH_BIN option or disable OPENCV_DNN_CUDA=OFF.")
     endif()
   endforeach()
   unset(CC_LIST)
@@ -104,18 +128,43 @@ else()
   set(sources_options ${sources_options} EXCLUDE_CUDA)
 endif()
 
+
+if(HAVE_TENGINE)
+	list(APPEND include_dirs ${TENGINE_INCLUDE_DIRS})
+	if(EXISTS ${TENGINE_LIBRARIES})
+		list(APPEND libs ${TENGINE_LIBRARIES})
+	else()
+		ocv_add_dependencies(opencv_dnn tengine)
+		list(APPEND libs ${TENGINE_LIBRARIES})
+	endif()
+endif()
+
+
 ocv_module_include_directories(${include_dirs})
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   ocv_append_source_files_cxx_compiler_options(fw_srcs "-Wno-suggest-override")  # GCC
+  ocv_append_source_files_cxx_compiler_options(fw_srcs "-Wno-array-bounds")  # GCC 9.3.0 (Ubuntu 20.04)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   ocv_append_source_files_cxx_compiler_options(fw_srcs "-Wno-inconsistent-missing-override")  # Clang
 endif()
 
 set(dnn_runtime_libs "")
 if(INF_ENGINE_TARGET)
+  set(use_nn_builder OFF)
+  if(TARGET inference_engine_nn_builder OR # custom imported target
+     TARGET IE::inference_engine_nn_builder OR # default imported target via InferenceEngineConfig.cmake
+     INF_ENGINE_RELEASE VERSION_LESS "2020000000") # compatibility with older versions on IE
+    set(use_nn_builder ON)
+  endif()
+  ocv_option(OPENCV_DNN_IE_NN_BUILDER_2019 "Build with Inference Engine NN Builder API support" ${use_nn_builder})  # future: NOT HAVE_NGRAPH
+  if(OPENCV_DNN_IE_NN_BUILDER_2019)
+    message(STATUS "DNN: Enabling Inference Engine NN Builder API support")
+    add_definitions(-DHAVE_DNN_IE_NN_BUILDER_2019=1)
+  endif()
   list(APPEND dnn_runtime_libs ${INF_ENGINE_TARGET})
 endif()
 if(HAVE_NGRAPH)
+  message(STATUS "DNN: Enabling Inference Engine nGraph API support")
   add_definitions(-DHAVE_DNN_NGRAPH)
   list(APPEND dnn_runtime_libs ngraph::ngraph)
 endif()

@@ -64,7 +64,7 @@ def createSSDGraph(modelPath, configPath, outputPath):
     # Nodes that should be kept.
     keepOps = ['Conv2D', 'BiasAdd', 'Add', 'AddV2', 'Relu', 'Relu6', 'Placeholder', 'FusedBatchNorm',
                'DepthwiseConv2dNative', 'ConcatV2', 'Mul', 'MaxPool', 'AvgPool', 'Identity',
-               'Sub', 'ResizeNearestNeighbor', 'Pad', 'FusedBatchNormV3']
+               'Sub', 'ResizeNearestNeighbor', 'Pad', 'FusedBatchNormV3', 'Mean']
 
     # Node with which prefixes should be removed
     prefixesToRemove = ('MultipleGridAnchorGenerator/', 'Concatenate/', 'Postprocessor/', 'Preprocessor/map')
@@ -234,8 +234,14 @@ def createSSDGraph(modelPath, configPath, outputPath):
 
     # Connect input node to the first layer
     assert(graph_def.node[0].op == 'Placeholder')
+    try:
+        input_shape = graph_def.node[0].attr['shape']['shape'][0]['dim']
+        input_shape[1]['size'] = image_height
+        input_shape[2]['size'] = image_width
+    except:
+        print("Input shapes are undefined")
     # assert(graph_def.node[1].op == 'Conv2D')
-    weights = graph_def.node[1].input[0]
+    weights = graph_def.node[1].input[-1]
     for i in range(len(graph_def.node[1].input)):
         graph_def.node[1].input.pop()
     graph_def.node[1].input.append(graph_def.node[0].name)

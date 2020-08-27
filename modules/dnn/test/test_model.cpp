@@ -131,6 +131,13 @@ TEST_P(Test_Model, DetectRegion)
 {
     applyTestTag(CV_TEST_TAG_LONG, CV_TEST_TAG_MEMORY_1GB);
 
+#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_EQ(2020040000)  // nGraph compilation failure
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && target == DNN_TARGET_OPENCL)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_OPENCL, CV_TEST_TAG_DNN_SKIP_IE_VERSION);
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && target == DNN_TARGET_OPENCL_FP16)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_OPENCL_FP16, CV_TEST_TAG_DNN_SKIP_IE_VERSION);
+#endif
+
 #if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_GE(2019010000)
     if (backend == DNN_BACKEND_INFERENCE_ENGINE && target == DNN_TARGET_OPENCL_FP16)
         applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_OPENCL_FP16);
@@ -255,6 +262,7 @@ TEST_P(Test_Model, DetectionMobilenetSSD)
     else if (target == DNN_TARGET_CUDA_FP16)
     {
         scoreDiff = 4e-4;
+        iouDiff = 1e-2;
     }
     float confThreshold = FLT_MIN;
     double nmsThreshold = 0.0;
@@ -273,9 +281,15 @@ TEST_P(Test_Model, Keypoints_pose)
 #endif
 
     Mat inp = imread(_tf("pose.png"));
-    std::string weights = _tf("onnx/models/lightweight_pose_estimation.onnx", false);
-    Mat exp = blobFromNPY(_tf("keypoints_exp.npy"));
-
+    std::string weights = _tf("onnx/models/lightweight_pose_estimation_201912.onnx", false);
+    float kpdata[] = {
+        237.65625f, 78.25f, 237.65625f, 136.9375f,
+        190.125f, 136.9375f, 142.59375f, 195.625f, 79.21875f, 176.0625f, 285.1875f, 117.375f,
+        348.5625f, 195.625f, 396.09375f, 176.0625f, 205.96875f, 313.0f, 205.96875f, 430.375f,
+        205.96875f, 528.1875f, 269.34375f, 293.4375f, 253.5f, 430.375f, 237.65625f, 528.1875f,
+        221.8125f, 58.6875f, 253.5f, 58.6875f, 205.96875f, 78.25f, 253.5f, 58.6875f
+    };
+    Mat exp(18, 2, CV_32FC1, kpdata);
 
     Size size{256, 256};
     float norm = 1e-4;
@@ -302,12 +316,20 @@ TEST_P(Test_Model, Keypoints_face)
     Mat exp = blobFromNPY(_tf("facial_keypoints_exp.npy"));
 
     Size size{224, 224};
-    float norm = (target == DNN_TARGET_OPENCL_FP16) ? 5e-3 : 1e-4;
     double scale = 1.0/255;
     Scalar mean = Scalar();
     bool swapRB = false;
 
     // Ref. Range: [-1.1784188, 1.7758257]
+    float norm = 1e-4;
+    if (target == DNN_TARGET_OPENCL_FP16)
+        norm = 5e-3;
+    if (target == DNN_TARGET_MYRIAD)
+    {
+        // Myriad2: l1 = 0.0004, lInf = 0.002
+        // MyriadX: l1 = 0.003, lInf = 0.009
+        norm = 0.009;
+    }
     if (target == DNN_TARGET_CUDA_FP16)
         norm = 0.004; // l1 = 0.0006, lInf = 0.004
 
@@ -331,11 +353,22 @@ TEST_P(Test_Model, Detection_normalized)
     double scoreDiff = 1e-5, iouDiff = 1e-5;
     float confThreshold = FLT_MIN;
     double nmsThreshold = 0.0;
+    if (target == DNN_TARGET_CUDA)
+    {
+        scoreDiff = 3e-4;
+        iouDiff = 0.018;
+    }
     if (target == DNN_TARGET_OPENCL_FP16 || target == DNN_TARGET_MYRIAD || target == DNN_TARGET_CUDA_FP16)
     {
         scoreDiff = 5e-3;
         iouDiff = 0.09;
     }
+#if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_EQ(2020040000)
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && target == DNN_TARGET_MYRIAD)
+    {
+        iouDiff = 0.095f;
+    }
+#endif
     testDetectModel(weights_file, config_file, img_path, refClassIds, refConfidences, refBoxes,
                     scoreDiff, iouDiff, confThreshold, nmsThreshold, size, mean, scale);
 }

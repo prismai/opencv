@@ -119,11 +119,16 @@ public:
         }
     };
 
-    ElementWiseLayer(const Func &f=Func()) : run_parallel(false) { func = f; }
+    ElementWiseLayer(const Func &f=Func()) { func = f; }
 
     virtual bool supportBackend(int backendId) CV_OVERRIDE
     {
         return func.supportBackend(backendId, this->preferableTarget);
+    }
+
+    virtual void finalize(InputArrayOfArrays, OutputArrayOfArrays) CV_OVERRIDE
+    {
+        func.finalize();
     }
 
     virtual Ptr<BackendNode> tryAttach(const Ptr<BackendNode>& node) CV_OVERRIDE
@@ -158,14 +163,14 @@ public:
         return Ptr<BackendNode>();
     }
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     virtual Ptr<BackendNode> initInfEngine(const std::vector<Ptr<BackendWrapper> >&) CV_OVERRIDE
     {
         InferenceEngine::Builder::Layer ieLayer = func.initInfEngineBuilderAPI();
         ieLayer.setName(this->name);
         return Ptr<BackendNode>(new InfEngineBackendNode(ieLayer));
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> >& inputs, const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
@@ -262,7 +267,6 @@ public:
     }
 
     Func func;
-    bool run_parallel;
 };
 
 #ifdef HAVE_OPENCL
@@ -277,7 +281,16 @@ static String oclGetTMacro(const UMat &m)
 }
 #endif
 
-struct ReLUFunctor
+struct BaseFunctor
+{
+    void finalize() {}
+
+    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
+
+    void getScaleShift(Mat&, Mat&) const {}
+};
+
+struct ReLUFunctor : public BaseFunctor
 {
     typedef ReLULayer Layer;
     float slope;
@@ -286,9 +299,11 @@ struct ReLUFunctor
 
     bool supportBackend(int backendId, int)
     {
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
         if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
             return slope >= 0 || !INF_ENGINE_VER_MAJOR_EQ(INF_ENGINE_RELEASE_2019R1);
+#endif
+#ifdef HAVE_DNN_NGRAPH
         if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
             return true;
 #endif
@@ -395,12 +410,12 @@ struct ReLUFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::ReLULayer("").setNegativeSlope(slope);
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -421,14 +436,10 @@ struct ReLUFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 1; }
 };
 
-struct ReLU6Functor
+struct ReLU6Functor : public BaseFunctor
 {
     typedef ReLU6Layer Layer;
     float minValue, maxValue;
@@ -526,12 +537,12 @@ struct ReLU6Functor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::ClampLayer("").setMinValue(minValue).setMaxValue(maxValue);
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -548,14 +559,10 @@ struct ReLU6Functor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 2; }
 };
 
-struct TanHFunctor
+struct TanHFunctor : public BaseFunctor
 {
     typedef TanHLayer Layer;
 
@@ -622,12 +629,12 @@ struct TanHFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::TanHLayer("");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -644,14 +651,10 @@ struct TanHFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 1; }
 };
 
-struct SwishFunctor
+struct SwishFunctor : public BaseFunctor
 {
     typedef SwishLayer Layer;
 
@@ -717,12 +720,12 @@ struct SwishFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         CV_Error(Error::StsNotImplemented, "");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -740,15 +743,10 @@ struct SwishFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 3; }
-
 };
 
-struct MishFunctor
+struct MishFunctor : public BaseFunctor
 {
     typedef MishLayer Layer;
 
@@ -765,8 +763,16 @@ struct MishFunctor
         {
             for( int i = 0; i < len; i++ )
             {
+                // Use fast approximation introduced in https://github.com/opencv/opencv/pull/17200
                 float x = srcptr[i];
-                dstptr[i] = x * tanh(log(1.0f + exp(x)));
+                if (x >= 8.f)
+                    dstptr[i] = x;
+                else
+                {
+                    float eX = exp(x);
+                    float n = (eX + 2) * eX;
+                    dstptr[i] = (x * n) / (n + 2);
+                }
             }
         }
     }
@@ -814,12 +820,12 @@ struct MishFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         CV_Error(Error::StsNotImplemented, "");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -842,15 +848,10 @@ struct MishFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 3; }
-
 };
 
-struct SigmoidFunctor
+struct SigmoidFunctor : public BaseFunctor
 {
     typedef SigmoidLayer Layer;
 
@@ -917,12 +918,12 @@ struct SigmoidFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::SigmoidLayer("");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -939,18 +940,12 @@ struct SigmoidFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 3; }
 };
 
-struct ELUFunctor
+struct ELUFunctor : public BaseFunctor
 {
     typedef ELULayer Layer;
-
-    explicit ELUFunctor() {}
 
     bool supportBackend(int backendId, int)
     {
@@ -1015,12 +1010,12 @@ struct ELUFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::ELULayer("");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -1037,14 +1032,10 @@ struct ELUFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 2; }
 };
 
-struct AbsValFunctor
+struct AbsValFunctor : public BaseFunctor
 {
     typedef AbsLayer Layer;
 
@@ -1114,12 +1105,12 @@ struct AbsValFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::ReLULayer("").setNegativeSlope(-0.999999f);
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -1139,14 +1130,10 @@ struct AbsValFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 1; }
 };
 
-struct BNLLFunctor
+struct BNLLFunctor : public BaseFunctor
 {
     typedef BNLLLayer Layer;
 
@@ -1214,12 +1201,12 @@ struct BNLLFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         CV_Error(Error::StsNotImplemented, "");
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -1236,23 +1223,19 @@ struct BNLLFunctor
     }
 #endif  // HAVE_VULKAN
 
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
-
     int64 getFLOPSPerElement() const { return 5; }
 };
 
-struct PowerFunctor
+struct PowerFunctor : public BaseFunctor
 {
     typedef PowerLayer Layer;
 
-    float power;
-    float scale;
-    float shift;
+    float power, scale, shift;
+    float originPower, originScale, originShift;
 
     explicit PowerFunctor(float power_ = 1.f, float scale_ = 1.f, float shift_ = 0.f)
-        : power(power_), scale(scale_), shift(shift_) {}
+        : power(power_), scale(scale_), shift(shift_),
+          originPower(power_), originScale(scale_), originShift(shift_) {}
 
     bool supportBackend(int backendId, int targetId)
     {
@@ -1264,6 +1247,13 @@ struct PowerFunctor
             return backendId == DNN_BACKEND_OPENCV ||
                    backendId == DNN_BACKEND_CUDA ||
                    backendId == DNN_BACKEND_HALIDE;
+    }
+
+    void finalize()
+    {
+        power = originPower;
+        scale = originScale;
+        shift = originShift;
     }
 
     void apply(const float* srcptr, float* dstptr, int len, size_t planeSize, int cn0, int cn1) const
@@ -1348,14 +1338,14 @@ struct PowerFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         return InferenceEngine::Builder::PowerLayer("").setPower(power)
                                                        .setScale(scale)
                                                        .setShift(shift);
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -1410,8 +1400,7 @@ struct PowerFunctor
     int64 getFLOPSPerElement() const { return power == 1 ? 2 : 10; }
 };
 
-
-struct ChannelsPReLUFunctor
+struct ChannelsPReLUFunctor : public BaseFunctor
 {
     typedef ChannelsPReLULayer Layer;
     Mat scale;
@@ -1518,7 +1507,7 @@ struct ChannelsPReLUFunctor
     }
 #endif  // HAVE_HALIDE
 
-#ifdef HAVE_INF_ENGINE
+#ifdef HAVE_DNN_IE_NN_BUILDER_2019
     InferenceEngine::Builder::Layer initInfEngineBuilderAPI()
     {
         InferenceEngine::Builder::Layer l = InferenceEngine::Builder::PReLULayer("");
@@ -1526,7 +1515,7 @@ struct ChannelsPReLUFunctor
         addConstantData("weights", wrapToInfEngineBlob(scale, {numChannels}, InferenceEngine::Layout::C), l);
         return l;
     }
-#endif  // HAVE_INF_ENGINE
+#endif  // HAVE_DNN_IE_NN_BUILDER_2019
 
 #ifdef HAVE_DNN_NGRAPH
     std::shared_ptr<ngraph::Node> initNgraphAPI(const std::shared_ptr<ngraph::Node>& node)
@@ -1544,10 +1533,6 @@ struct ChannelsPReLUFunctor
         return std::shared_ptr<vkcom::OpBase>();
     }
 #endif  // HAVE_VULKAN
-
-    bool tryFuse(Ptr<dnn::Layer>&) { return false; }
-
-    void getScaleShift(Mat&, Mat&) const {}
 
     int64 getFLOPSPerElement() const { return 1; }
 };

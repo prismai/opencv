@@ -2030,17 +2030,23 @@ GAPI_FLUID_KERNEL(GFluidResize, cv::gapi::core::GResize, true)
     }
 
     static void initScratch(const cv::GMatDesc& in,
-                            cv::Size outSz, double /*fx*/, double /*fy*/, int /*interp*/,
+                            cv::Size outSz, double fx, double fy, int /*interp*/,
                             cv::gapi::fluid::Buffer &scratch)
     {
-        CV_Assert(in.depth == CV_8U && in.chan == 3);
+        GAPI_Assert(in.depth == CV_8U && in.chan == 3);
+
+        if (outSz.area() == 0)
+        {
+            outSz.width  = static_cast<int>(round(in.size.width  * fx));
+            outSz.height = static_cast<int>(round(in.size.height * fy));
+        }
 
         cv::Size scratch_size{static_cast<int>(outSz.width * sizeof(ResizeUnit)), 1};
 
         cv::GMatDesc desc;
         desc.chan  = 1;
         desc.depth = CV_8UC1;
-        desc.size  = to_own(scratch_size);
+        desc.size  = scratch_size;
 
         cv::gapi::fluid::Buffer buffer(desc);
         scratch = std::move(buffer);
