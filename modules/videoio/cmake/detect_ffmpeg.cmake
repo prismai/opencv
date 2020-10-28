@@ -50,29 +50,29 @@ endif()
 
 #=================================
 # Versions check.
-if(HAVE_FFMPEG AND NOT HAVE_FFMPEG_WRAPPER)
-  set(_min_libavcodec_version 54.35.0)
-  set(_min_libavformat_version 54.20.4)
-  set(_min_libavutil_version 52.3.0)
-  set(_min_libswscale_version 2.1.1)
-  set(_min_libavresample_version 1.0.1)
-  foreach(ffmpeg_lib ${_used_ffmpeg_libraries})
-    if(FFMPEG_${ffmpeg_lib}_VERSION VERSION_LESS _min_${ffmpeg_lib}_version)
-      message(STATUS "FFMPEG is disabled. Can't find suitable ${ffmpeg_lib} library"
-              " (minimal ${_min_${ffmpeg_lib}_version}, found ${FFMPEG_${ffmpeg_lib}_VERSION}).")
-      set(HAVE_FFMPEG FALSE)
-    endif()
-  endforeach()
-  if(NOT HAVE_FFMPEG)
-    message(STATUS "FFMPEG libraries version check failed "
-            "(minimal libav release 9.20, minimal FFMPEG release 1.1.16).")
-  endif()
-  unset(_min_libavcodec_version)
-  unset(_min_libavformat_version)
-  unset(_min_libavutil_version)
-  unset(_min_libswscale_version)
-  unset(_min_libavresample_version)
-endif()
+#if(HAVE_FFMPEG AND NOT HAVE_FFMPEG_WRAPPER)
+#  set(_min_libavcodec_version 54.35.0)
+#  set(_min_libavformat_version 54.20.4)
+#  set(_min_libavutil_version 52.3.0)
+#  set(_min_libswscale_version 2.1.1)
+#  set(_min_libavresample_version 1.0.1)
+#  foreach(ffmpeg_lib ${_used_ffmpeg_libraries})
+#    if(FFMPEG_${ffmpeg_lib}_VERSION VERSION_LESS _min_${ffmpeg_lib}_version)
+#      message(STATUS "FFMPEG is disabled. Can't find suitable ${ffmpeg_lib} library"
+#              " (minimal ${_min_${ffmpeg_lib}_version}, found ${FFMPEG_${ffmpeg_lib}_VERSION}).")
+#      set(HAVE_FFMPEG FALSE)
+#    endif()
+#  endforeach()
+#  if(NOT HAVE_FFMPEG)
+#    message(STATUS "FFMPEG libraries version check failed "
+#            "(minimal libav release 9.20, minimal FFMPEG release 1.1.16).")
+#  endif()
+#  unset(_min_libavcodec_version)
+#  unset(_min_libavformat_version)
+#  unset(_min_libavutil_version)
+#  unset(_min_libswscale_version)
+#  unset(_min_libavresample_version)
+#endif()
 
 #==================================
 
