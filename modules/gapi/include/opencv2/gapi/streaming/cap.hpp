@@ -35,7 +35,7 @@ namespace wip {
  * This class implements IStreamSource interface.
  * Its constructor takes the same parameters as cv::VideoCapture does.
  *
- * Please make sure that videoio OpenCV module is avaiable before using
+ * Please make sure that videoio OpenCV module is available before using
  * this in your application (G-API doesn't depend on it directly).
  *
  * @note stream sources are passed to G-API via shared pointers, so
@@ -102,6 +102,12 @@ protected:
         return cv::GMetaArg{cv::descr_of(first)};
     }
 };
+
+// NB: Overload for using from python
+GAPI_EXPORTS_W cv::Ptr<IStreamSource> inline make_capture_src(const std::string& path)
+{
+    return make_src<GCaptureSource>(path);
+}
 
 } // namespace wip
 } // namespace gapi

@@ -953,7 +953,7 @@ bool GStreamerCapture::open(const String &filename_)
  * \return property value
  *
  * There are two ways the properties can be retrieved. For seek-based properties we can query the pipeline.
- * For frame-based properties, we use the caps of the lasst receivef sample. This means that some properties
+ * For frame-based properties, we use the caps of the last receivef sample. This means that some properties
  * are not available until a first frame was received
  */
 double GStreamerCapture::getProperty(int propId) const
@@ -1673,9 +1673,11 @@ bool CvVideoWriter_GStreamer::writeFrame( const IplImage * image )
     return true;
 }
 
-Ptr<IVideoWriter> create_GStreamer_writer(const std::string &filename, int fourcc, double fps, const cv::Size &frameSize, bool isColor, int bitrate)
+Ptr<IVideoWriter> create_GStreamer_writer(const std::string& filename, int fourcc, double fps,
+                                          const cv::Size& frameSize, const VideoWriterParameters& params)
 {
     CvVideoWriter_GStreamer* wrt = new CvVideoWriter_GStreamer;
+    const bool isColor = params.get(VIDEOWRITER_PROP_IS_COLOR, true);
     try
     {
         if (wrt->open(filename, fourcc, fps, frameSize, isColor))

@@ -117,6 +117,10 @@ class dnn_test(NewOpenCVTests):
             return False
         return True
 
+    def test_getAvailableTargets(self):
+        targets = cv.dnn.getAvailableTargets(cv.dnn.DNN_BACKEND_OPENCV)
+        self.assertTrue(cv.dnn.DNN_TARGET_CPU in targets)
+
     def test_blobFromImage(self):
         np.random.seed(324)
 
@@ -274,6 +278,12 @@ class dnn_test(NewOpenCVTests):
                 ret, result = outs[i].get(timeoutNs=float(timeout))
                 self.assertTrue(ret)
                 normAssert(self, refs[i], result, 'Index: %d' % i, 1e-10)
+
+    def test_nms(self):
+        confs = (1, 1)
+        rects = ((0, 0, 0.4, 0.4), (0, 0, 0.2, 0.4)) # 0.5 overlap
+
+        self.assertTrue(all(cv.dnn.NMSBoxes(rects, confs, 0, 0.6).ravel() == (0, 1)))
 
     def test_custom_layer(self):
         class CropLayer(object):

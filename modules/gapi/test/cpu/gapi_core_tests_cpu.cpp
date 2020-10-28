@@ -2,7 +2,7 @@
 // It is subject to the license terms in the LICENSE file found in the top-level directory
 // of this distribution and at http://opencv.org/license.html.
 //
-// Copyright (C) 2018-2019 Intel Corporation
+// Copyright (C) 2018-2020 Intel Corporation
 
 
 #include "../test_precomp.hpp"
@@ -11,7 +11,7 @@
 
 namespace
 {
-#define CORE_CPU [] () { return cv::compile_args(cv::gapi::core::cpu::kernels()); }
+#define CORE_CPU [] () { return cv::compile_args(cv::gapi::use_only{cv::gapi::core::cpu::kernels()}); }
 }  // anonymous namespace
 
 namespace opencv_test
@@ -155,7 +155,8 @@ INSTANTIATE_TEST_CASE_P(CompareTestCPU, CmpTest,
                                 Values(CV_8U),
                                 Values(CORE_CPU),
                                 Values(CMP_EQ, CMP_GE, CMP_NE, CMP_GT, CMP_LT, CMP_LE),
-                                testing::Bool()));
+                                testing::Bool(),
+                                Values(AbsExact().to_compare_obj())));
 
 INSTANTIATE_TEST_CASE_P(BitwiseTestCPU, BitwiseTest,
                         Combine(Values( CV_8UC1, CV_8UC3, CV_16UC1, CV_16SC1),
@@ -164,7 +165,8 @@ INSTANTIATE_TEST_CASE_P(BitwiseTestCPU, BitwiseTest,
                                        cv::Size(128, 128)),
                                 Values(-1),
                                 Values(CORE_CPU),
-                                Values(AND, OR, XOR)));
+                                Values(AND, OR, XOR),
+                                testing::Bool()));
 
 INSTANTIATE_TEST_CASE_P(BitwiseNotTestCPU, NotTest,
                         Combine(Values(CV_8UC1, CV_8UC3, CV_16UC1, CV_16SC1),
@@ -197,6 +199,15 @@ INSTANTIATE_TEST_CASE_P(SumTestCPU, SumTest,
                                        cv::Size(128, 128)),
                                 Values(-1),
                                 //Values(1e-5),
+                                Values(CORE_CPU),
+                                Values(AbsToleranceScalar(1e-5).to_compare_obj())));
+
+INSTANTIATE_TEST_CASE_P(CountNonZeroTestCPU, CountNonZeroTest,
+                        Combine(Values( CV_8UC1, CV_16UC1, CV_16SC1, CV_32FC1 ),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480),
+                                       cv::Size(128, 128)),
+                                Values(-1),
                                 Values(CORE_CPU),
                                 Values(AbsToleranceScalar(1e-5).to_compare_obj())));
 
@@ -435,6 +446,32 @@ INSTANTIATE_TEST_CASE_P(ConcatHorVecTestCPU, ConcatHorVecTest,
                                 Values(-1),
                                 Values(CORE_CPU)));
 
+INSTANTIATE_TEST_CASE_P(WarpPerspectiveTestCPU, WarpPerspectiveTest,
+                        Combine(Values(CV_8UC1, CV_8UC3),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(-1),
+                                Values(CORE_CPU),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(-50.0, 90.0),
+                                Values(0.6),
+                                Values(cv::INTER_LINEAR),
+                                Values(cv::BORDER_CONSTANT),
+                                Values(cv::Scalar())));
+
+INSTANTIATE_TEST_CASE_P(WarpAffineTestCPU, WarpAffineTest,
+                        Combine(Values(CV_8UC1, CV_8UC3),
+                                Values(cv::Size(1280, 720),
+                                       cv::Size(640, 480)),
+                                Values(-1),
+                                Values(CORE_CPU),
+                                Values(AbsExact().to_compare_obj()),
+                                Values(-50.0, 90.0),
+                                Values(0.6),
+                                Values(cv::INTER_LINEAR),
+                                Values(cv::BORDER_CONSTANT),
+                                Values(cv::Scalar())));
+
 INSTANTIATE_TEST_CASE_P(NormalizeTestCPU, NormalizeTest,
                         Combine(Values(CV_8UC1, CV_8UC3, CV_16UC1, CV_16SC1, CV_32FC1),
                                 Values(cv::Size(1280, 720),
@@ -470,4 +507,43 @@ INSTANTIATE_TEST_CASE_P(ReInitOutTestCPU, ReInitOutTest,
                                 Values(cv::Size(640, 400),
                                        cv::Size(10, 480))));
 
+INSTANTIATE_TEST_CASE_P(ParseTestCPU, ParseSSDBLTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_32FC1),
+                                Values(cv::Size(1920, 1080)),
+                                Values(-1),
+                                Values(CORE_CPU),
+                                Values(0.3f, 0.5f, 0.7f),
+                                Values(-1, 0, 1)));
+
+INSTANTIATE_TEST_CASE_P(ParseTestCPU, ParseSSDTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_32FC1),
+                                Values(cv::Size(1920, 1080)),
+                                Values(-1),
+                                Values(CORE_CPU),
+                                Values(0.3f, 0.5f, 0.7f),
+                                testing::Bool(),
+                                testing::Bool()));
+
+INSTANTIATE_TEST_CASE_P(ParseTestCPU, ParseYoloTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_32FC1),
+                                Values(cv::Size(1920, 1080)),
+                                Values(-1),
+                                Values(CORE_CPU),
+                                Values(0.3f, 0.5f, 0.7f),
+                                Values(0.5f, 1.0f),
+                                Values(80, 7)));
+
+INSTANTIATE_TEST_CASE_P(SizeTestCPU, SizeTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_32FC1),
+                                Values(cv::Size(32, 32),
+                                       cv::Size(640, 320)),
+                                Values(-1),
+                                Values(CORE_CPU)));
+
+INSTANTIATE_TEST_CASE_P(SizeRTestCPU, SizeRTest,
+                        Combine(Values(CV_8UC1, CV_8UC3, CV_32FC1),
+                                Values(cv::Size(32, 32),
+                                       cv::Size(640, 320)),
+                                Values(-1),
+                                Values(CORE_CPU)));
 }

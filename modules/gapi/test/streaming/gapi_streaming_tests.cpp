@@ -154,7 +154,7 @@ TEST_P(GAPI_Streaming, SmokeTest_ConstInput_GMat)
         // With constant inputs, the stream is endless so
         // the blocking pull() should never return `false`.
         EXPECT_TRUE(ccomp.pull(cv::gout(out_mat_gapi)));
-        EXPECT_EQ(0, cv::countNonZero(out_mat_gapi != out_mat_ocv));
+        EXPECT_EQ(0, cvtest::norm(out_mat_gapi, out_mat_ocv, NORM_INF));
     }
 
     EXPECT_TRUE(ccomp.running());
@@ -202,7 +202,7 @@ TEST_P(GAPI_Streaming, SmokeTest_VideoInput_GMat)
         frames++;
         cv::Mat out_mat_ocv;
         opencv_ref(in_mat_gapi, out_mat_ocv);
-        EXPECT_EQ(0, cv::countNonZero(out_mat_gapi != out_mat_ocv));
+        EXPECT_EQ(0, cvtest::norm(out_mat_gapi, out_mat_ocv, NORM_INF));
     }
     EXPECT_LT(0u, frames);
     EXPECT_FALSE(ccomp.running());
@@ -730,6 +730,8 @@ TEST(GAPI_Streaming_Types, OutputScalar)
 
     cv::VideoCapture cap;
     cap.open(video_path);
+    if (!cap.isOpened())
+        throw SkipTestException("Video file can not be opened");
 
     cv::Mat tmp;
     cv::Scalar out_scl;
@@ -774,6 +776,8 @@ TEST(GAPI_Streaming_Types, OutputVector)
 
     cv::VideoCapture cap;
     cap.open(video_path);
+    if (!cap.isOpened())
+        throw SkipTestException("Video file can not be opened");
 
     cv::Mat tmp;
     std::vector<int> ref_vec;
@@ -814,6 +818,10 @@ struct GAPI_Streaming_Unit: public ::testing::Test {
         ref = cc.compile(a_desc, b_desc);
     }
 };
+
+// FIXME: (GAPI_Streaming_Types,   InputOpaque) test is missing here!
+// FIXME: (GAPI_Streaming_Types, XChangeOpaque) test is missing here!
+// FIXME: (GAPI_Streaming_Types,  OutputOpaque) test is missing here!
 
 TEST_F(GAPI_Streaming_Unit, TestTwoVideoSourcesFail)
 {
@@ -973,6 +981,41 @@ TEST_F(GAPI_Streaming_Unit, SetSource_After_Completion)
     // Test against new ref
     ref(cv::gin(eye, m), cv::gout(out_ref));
     EXPECT_EQ(0., cv::norm(out, out_ref, cv::NORM_INF));
+}
+
+// NB: Check pull overload for python
+TEST(Streaming, Python_Pull_Overload)
+{
+    cv::GMat in;
+    auto out = cv::gapi::copy(in);
+    cv::GComputation c(in, out);
+
+    cv::Size sz(3,3);
+    cv::Mat in_mat(sz, CV_8UC3);
+    cv::randu(in_mat, cv::Scalar::all(0), cv::Scalar(255));
+
+    auto ccomp = c.compileStreaming(cv::descr_of(in_mat));
+
+    EXPECT_TRUE(ccomp);
+    EXPECT_FALSE(ccomp.running());
+
+    ccomp.setSource(cv::gin(in_mat));
+
+    ccomp.start();
+    EXPECT_TRUE(ccomp.running());
+
+    bool has_output;
+    cv::GRunArgs outputs;
+    std::tie(has_output, outputs) = ccomp.pull();
+
+    EXPECT_TRUE(has_output);
+    EXPECT_EQ(1u, outputs.size());
+
+    auto out_mat = cv::util::get<cv::Mat>(outputs[0]);
+    EXPECT_EQ(0., cv::norm(in_mat, out_mat, cv::NORM_INF));
+
+    ccomp.stop();
+    EXPECT_FALSE(ccomp.running());
 }
 
 } // namespace opencv_test

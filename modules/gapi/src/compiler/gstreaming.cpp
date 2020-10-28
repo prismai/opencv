@@ -7,8 +7,6 @@
 
 #include "precomp.hpp"
 
-#if !defined(GAPI_STANDALONE)
-
 #include <ade/graph.hpp>
 
 #include <opencv2/gapi/gproto.hpp> // can_describe
@@ -113,6 +111,39 @@ bool cv::GStreamingCompiled::pull(cv::GRunArgsP &&outs)
     return m_priv->pull(std::move(outs));
 }
 
+std::tuple<bool, cv::GRunArgs> cv::GStreamingCompiled::pull()
+{
+    GRunArgs run_args;
+    GRunArgsP outs;
+    const auto& out_shapes = m_priv->outShapes();
+    run_args.reserve(out_shapes.size());
+    outs.reserve(out_shapes.size());
+
+    for (auto&& shape : out_shapes)
+    {
+        switch (shape)
+        {
+            case cv::GShape::GMAT:
+            {
+                run_args.emplace_back(cv::Mat{});
+                outs.emplace_back(&cv::util::get<cv::Mat>(run_args.back()));
+                break;
+            }
+            case cv::GShape::GSCALAR:
+            {
+                run_args.emplace_back(cv::Scalar{});
+                outs.emplace_back(&cv::util::get<cv::Scalar>(run_args.back()));
+                break;
+            }
+            default:
+                util::throw_error(std::logic_error("Only cv::GMat and cv::GScalar are supported for python output"));
+        }
+    }
+
+    bool is_over = m_priv->pull(std::move(outs));
+    return std::make_tuple(is_over, run_args);
+}
+
 bool cv::GStreamingCompiled::try_pull(cv::GRunArgsP &&outs)
 {
     return m_priv->try_pull(std::move(outs));
@@ -147,5 +178,3 @@ cv::GStreamingCompiled::Priv& cv::GStreamingCompiled::priv()
 {
     return *m_priv;
 }
-
-#endif // GAPI_STANDALONE

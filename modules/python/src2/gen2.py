@@ -4,11 +4,13 @@ from __future__ import print_function
 import hdr_parser, sys, re, os
 from string import Template
 from pprint import pprint
+from collections import namedtuple
 
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+
 
 forbidden_arg_types = ["void*"]
 
@@ -25,14 +27,14 @@ gen_template_check_self = Template("""
 gen_template_call_constructor_prelude = Template("""new (&(self->v)) Ptr<$cname>(); // init Ptr with placement new
         if(self) """)
 
-gen_template_call_constructor = Template("""self->v.reset(new ${cname}${args})""")
+gen_template_call_constructor = Template("""self->v.reset(new ${cname}${py_args})""")
 
 gen_template_simple_call_constructor_prelude = Template("""if(self) """)
 
-gen_template_simple_call_constructor = Template("""new (&(self->v)) ${cname}${args}""")
+gen_template_simple_call_constructor = Template("""new (&(self->v)) ${cname}${py_args}""")
 
 gen_template_parse_args = Template("""const char* keywords[] = { $kw_list, NULL };
-    if( PyArg_ParseTupleAndKeywords(args, kw, "$fmtspec", (char**)keywords, $parse_arglist)$code_cvt )""")
+    if( PyArg_ParseTupleAndKeywords(py_args, kw, "$fmtspec", (char**)keywords, $parse_arglist)$code_cvt )""")
 
 gen_template_func_body = Template("""$code_decl
     $code_parse
@@ -172,17 +174,47 @@ gen_template_prop_init = Template("""
 gen_template_rw_prop_init = Template("""
     {(char*)"${member}", (getter)pyopencv_${name}_get_${member}, (setter)pyopencv_${name}_set_${member}, (char*)"${member}", NULL},""")
 
+class FormatStrings:
+    string = 's'
+    unsigned_char = 'b'
+    short_int = 'h'
+    int = 'i'
+    unsigned_int = 'I'
+    long = 'l'
+    unsigned_long = 'k'
+    long_long = 'L'
+    unsigned_long_long = 'K'
+    size_t = 'n'
+    float = 'f'
+    double = 'd'
+    object = 'O'
+
+ArgTypeInfo = namedtuple('ArgTypeInfo',
+                        ['atype', 'format_str', 'default_value',
+                         'strict_conversion'])
+# strict_conversion is False by default
+ArgTypeInfo.__new__.__defaults__ = (False,)
+
 simple_argtype_mapping = {
-    "bool": ("bool", "b", "0"),
-    "size_t": ("size_t", "I", "0"),
-    "int": ("int", "i", "0"),
-    "float": ("float", "f", "0.f"),
-    "double": ("double", "d", "0"),
-    "c_string": ("char*", "s", '(char*)""')
+    "bool": ArgTypeInfo("bool", FormatStrings.unsigned_char, "0", True),
+    "size_t": ArgTypeInfo("size_t", FormatStrings.unsigned_long_long, "0", True),
+    "int": ArgTypeInfo("int", FormatStrings.int, "0", True),
+    "float": ArgTypeInfo("float", FormatStrings.float, "0.f", True),
+    "double": ArgTypeInfo("double", FormatStrings.double, "0", True),
+    "c_string": ArgTypeInfo("char*", FormatStrings.string, '(char*)""')
 }
+
 
 def normalize_class_name(name):
     return re.sub(r"^cv\.", "", name).replace(".", "_")
+
+
+def get_type_format_string(arg_type_info):
+    if arg_type_info.strict_conversion:
+        return FormatStrings.object
+    else:
+        return arg_type_info.format_str
+
 
 class ClassProp(object):
     def __init__(self, decl):
@@ -330,6 +362,7 @@ class ArgInfo(object):
         self.inputarg = True
         self.outputarg = False
         self.returnarg = False
+        self.isrvalueref = False
         for m in arg_tuple[3]:
             if m == "/O":
                 self.inputarg = False
@@ -345,6 +378,8 @@ class ArgInfo(object):
             elif m.startswith("/CA"):
                 self.isarray = True
                 self.arraycvt = m[2:].strip()
+            elif m == "/RRef":
+                self.isrvalueref = True
         self.py_inputarg = False
         self.py_outputarg = False
 
@@ -497,14 +532,14 @@ class FuncInfo(object):
     def get_wrapper_prototype(self, codegen):
         full_fname = self.get_wrapper_name()
         if self.isconstructor:
-            return "static int {fn_name}(pyopencv_{type_name}_t* self, PyObject* args, PyObject* kw)".format(
+            return "static int {fn_name}(pyopencv_{type_name}_t* self, PyObject* py_args, PyObject* kw)".format(
                     fn_name=full_fname, type_name=codegen.classes[self.classname].name)
 
         if self.classname:
             self_arg = "self"
         else:
             self_arg = ""
-        return "static PyObject* %s(PyObject* %s, PyObject* args, PyObject* kw)" % (full_fname, self_arg)
+        return "static PyObject* %s(PyObject* %s, PyObject* py_args, PyObject* kw)" % (full_fname, self_arg)
 
     def get_tab_entry(self):
         prototype_list = []
@@ -575,7 +610,7 @@ class FuncInfo(object):
                 fullname = selfinfo.wname + "." + fullname
 
         all_code_variants = []
-        declno = -1
+
         for v in self.variants:
             code_decl = ""
             code_ret = ""
@@ -583,7 +618,6 @@ class FuncInfo(object):
 
             code_args = "("
             all_cargs = []
-            parse_arglist = []
 
             if v.isphantom and ismethod and not self.is_static:
                 code_args += "_self_"
@@ -616,22 +650,22 @@ class FuncInfo(object):
                 if any(tp in codegen.enums.keys() for tp in tp_candidates):
                     defval0 = "static_cast<%s>(%d)" % (a.tp, 0)
 
-                amapping = simple_argtype_mapping.get(tp, (tp, "O", defval0))
+                arg_type_info = simple_argtype_mapping.get(tp, ArgTypeInfo(tp, FormatStrings.object, defval0, True))
                 parse_name = a.name
                 if a.py_inputarg:
-                    if amapping[1] == "O":
+                    if arg_type_info.strict_conversion:
                         code_decl += "    PyObject* pyobj_%s = NULL;\n" % (a.name,)
                         parse_name = "pyobj_" + a.name
                         if a.tp == 'char':
-                            code_cvt_list.append("convert_to_char(pyobj_%s, &%s, %s)"% (a.name, a.name, a.crepr()))
+                            code_cvt_list.append("convert_to_char(pyobj_%s, &%s, %s)" % (a.name, a.name, a.crepr()))
                         else:
                             code_cvt_list.append("pyopencv_to(pyobj_%s, %s, %s)" % (a.name, a.name, a.crepr()))
 
-                all_cargs.append([amapping, parse_name])
+                all_cargs.append([arg_type_info, parse_name])
 
                 defval = a.defval
                 if not defval:
-                    defval = amapping[2]
+                    defval = arg_type_info.default_value
                 else:
                     if "UMat" in tp:
                         if "Mat" in defval and "UMat" not in defval:
@@ -640,17 +674,21 @@ class FuncInfo(object):
                         if "Mat" in defval and "GpuMat" not in defval:
                             defval = defval.replace("Mat", "cuda::GpuMat")
                 # "tp arg = tp();" is equivalent to "tp arg;" in the case of complex types
-                if defval == tp + "()" and amapping[1] == "O":
+                if defval == tp + "()" and arg_type_info.format_str == FormatStrings.object:
                     defval = ""
                 if a.outputarg and not a.inputarg:
                     defval = ""
                 if defval:
-                    code_decl += "    %s %s=%s;\n" % (amapping[0], a.name, defval)
+                    code_decl += "    %s %s=%s;\n" % (arg_type_info.atype, a.name, defval)
                 else:
-                    code_decl += "    %s %s;\n" % (amapping[0], a.name)
+                    code_decl += "    %s %s;\n" % (arg_type_info.atype, a.name)
 
                 if not code_args.endswith("("):
                     code_args += ", "
+
+                if a.isrvalueref:
+                    a.name = 'std::move(' + a.name + ')'
+
                 code_args += amp + a.name
 
             code_args += ")"
@@ -664,7 +702,7 @@ class FuncInfo(object):
                     templ = gen_template_call_constructor
 
                 code_prelude = templ_prelude.substitute(name=selfinfo.name, cname=selfinfo.cname)
-                code_fcall = templ.substitute(name=selfinfo.name, cname=selfinfo.cname, args=code_args)
+                code_fcall = templ.substitute(name=selfinfo.name, cname=selfinfo.cname, py_args=code_args)
                 if v.isphantom:
                     code_fcall = code_fcall.replace("new " + selfinfo.cname, self.cname.replace("::", "_"))
             else:
@@ -689,12 +727,16 @@ class FuncInfo(object):
             if v.rettype:
                 tp = v.rettype
                 tp1 = tp.replace("*", "_ptr")
-                amapping = simple_argtype_mapping.get(tp, (tp, "O", "0"))
-                all_cargs.append(amapping)
+                default_info = ArgTypeInfo(tp, FormatStrings.object, "0")
+                arg_type_info = simple_argtype_mapping.get(tp, default_info)
+                all_cargs.append(arg_type_info)
 
             if v.args and v.py_arglist:
                 # form the format spec for PyArg_ParseTupleAndKeywords
-                fmtspec = "".join([all_cargs[argno][0][1] for aname, argno in v.py_arglist])
+                fmtspec = "".join([
+                    get_type_format_string(all_cargs[argno][0])
+                    for aname, argno in v.py_arglist
+                ])
                 if v.py_noptargs > 0:
                     fmtspec = fmtspec[:-v.py_noptargs] + "|" + fmtspec[-v.py_noptargs:]
                 fmtspec += ":" + fullname
@@ -709,7 +751,7 @@ class FuncInfo(object):
                     parse_arglist = ", ".join(["&" + all_cargs[argno][1] for aname, argno in v.py_arglist]),
                     code_cvt = " &&\n        ".join(code_cvt_list))
             else:
-                code_parse = "if(PyObject_Size(args) == 0 && (!kw || PyObject_Size(kw) == 0))"
+                code_parse = "if(PyObject_Size(py_args) == 0 && (!kw || PyObject_Size(kw) == 0))"
 
             if len(v.py_outlist) == 0:
                 code_ret = "Py_RETURN_NONE"
@@ -722,10 +764,6 @@ class FuncInfo(object):
             else:
                 # there is more than 1 return parameter; form the tuple out of them
                 fmtspec = "N"*len(v.py_outlist)
-                backcvt_arg_list = []
-                for aname, argno in v.py_outlist:
-                    amapping = all_cargs[argno][0]
-                    backcvt_arg_list.append("%s(%s)" % (amapping[2], aname))
                 code_ret = "return Py_BuildValue(\"(%s)\", %s)" % \
                     (fmtspec, ", ".join(["pyopencv_from(" + aname + ")" for aname, argno in v.py_outlist]))
 
