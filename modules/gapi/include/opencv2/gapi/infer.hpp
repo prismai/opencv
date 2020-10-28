@@ -121,6 +121,49 @@ struct GInferBase {
     }
 };
 
+// Struct stores network input/output names.
+// Used by infer<Generic>
+struct InOutInfo
+{
+    std::vector<std::string> in_names;
+    std::vector<std::string> out_names;
+};
+
+/**
+ * @{
+ * @brief G-API object used to collect network inputs
+ */
+class GAPI_EXPORTS_W_SIMPLE GInferInputs
+{
+using Map = std::unordered_map<std::string, GMat>;
+public:
+    GAPI_WRAP GInferInputs();
+    GAPI_WRAP void setInput(const std::string& name, const cv::GMat& value);
+
+    cv::GMat& operator[](const std::string& name);
+    const Map& getBlobs() const;
+
+private:
+    std::shared_ptr<Map> in_blobs;
+};
+/** @} */
+
+/**
+ * @{
+ * @brief G-API object used to collect network outputs
+ */
+struct GAPI_EXPORTS_W_SIMPLE GInferOutputs
+{
+public:
+    GAPI_WRAP GInferOutputs() = default;
+    GInferOutputs(std::shared_ptr<cv::GCall> call);
+    GAPI_WRAP cv::GMat at(const std::string& name);
+
+private:
+    struct Priv;
+    std::shared_ptr<Priv> m_priv;
+};
+/** @} */
 
 // Base "Infer list" kernel.
 // All notes from "Infer" kernel apply here as well.
@@ -254,6 +297,50 @@ typename Net::Result infer(Args&&... args) {
     return GInfer<Net>::on(std::forward<Args>(args)...);
 }
 
+/**
+ * @brief Special network type
+ */
+struct Generic { };
+
+/**
+ * @brief Calculates response for generic network
+ *
+ * @param tag a network tag
+ * @param inputs networks's inputs
+ * @return a GInferOutputs
+ */
+template<typename T = Generic> GInferOutputs
+infer(const std::string& tag, const GInferInputs& inputs)
+{
+    std::vector<GArg> input_args;
+    std::vector<std::string> input_names;
+
+    const auto& blobs = inputs.getBlobs();
+    for (auto&& p : blobs)
+    {
+        input_names.push_back(p.first);
+        input_args.emplace_back(p.second);
+    }
+
+    GKinds kinds(blobs.size(), cv::detail::OpaqueKind::CV_MAT);
+    auto call = std::make_shared<cv::GCall>(GKernel{
+                GInferBase::id(),
+                tag,
+                GInferBase::getOutMeta,
+                {}, // outShape will be filled later
+                std::move(kinds)
+            });
+
+    call->setArgs(std::move(input_args));
+    call->params() = InOutInfo{input_names, {}};
+
+    return GInferOutputs{std::move(call)};
+}
+
+GAPI_EXPORTS_W inline GInferOutputs infer(const String& name, const GInferInputs& inputs)
+{
+    return infer<Generic>(name, inputs);
+}
 
 } // namespace gapi
 } // namespace cv
@@ -283,8 +370,8 @@ struct GAPI_EXPORTS GNetParam {
  *
  * @sa cv::gapi::networks
  */
-struct GAPI_EXPORTS GNetPackage {
-    GNetPackage() : GNetPackage({}) {}
+struct GAPI_EXPORTS_W_SIMPLE GNetPackage {
+    GAPI_WRAP GNetPackage() : GNetPackage({}) {}
     explicit GNetPackage(std::initializer_list<GNetParam> &&ii);
     std::vector<GBackend> backends() const;
     std::vector<GNetParam> networks;
