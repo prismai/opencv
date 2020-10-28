@@ -5,6 +5,8 @@
 #ifndef OPENCV_UTILS_FILESYSTEM_PRIVATE_HPP
 #define OPENCV_UTILS_FILESYSTEM_PRIVATE_HPP
 
+#define OPENCV_HAVE_FILESYSTEM_SUPPORT 1
+
 // TODO Move to CMake?
 #ifndef OPENCV_HAVE_FILESYSTEM_SUPPORT
 #  if defined(__EMSCRIPTEN__) || defined(__native_client__)
